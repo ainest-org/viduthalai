@@ -1,9 +1,13 @@
 import secrets
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.jobs.gitlab_webhook import process_webhook_event
@@ -11,17 +15,41 @@ from app.models.gitlab_connection import GitLabConnection
 from app.models.user import User
 from app.models.webhook_event import WebhookEvent
 from app.queue import webhook_queue
-from app.schemas.gitlab import GitLabConnect, GitLabConnectionOut
-from app.services.crypto import encrypt
+from app.schemas.gitlab import GitLabConnectionOut, GitLabOAuthStart, GitLabOAuthStartOut
+from app.services.crypto import decrypt, encrypt
 from app.services.gitlab_client import GitLabClientError
 from app.services.gitlab_client import get_current_user as fetch_gitlab_user
+from app.services.gitlab_oauth import (
+    GitLabOAuthError,
+    build_authorize_url,
+    exchange_code,
+    make_state,
+    verify_state,
+)
 from app.services.permissions import get_org_role
 
 router = APIRouter(tags=["gitlab"])
 
 
+def _public_base_url(request: Request) -> str:
+    if settings.public_api_base_url:
+        return settings.public_api_base_url.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 def _webhook_url(org_id: int, request: Request) -> str:
-    return f"{str(request.base_url).rstrip('/')}/webhooks/gitlab/{org_id}"
+    return f"{_public_base_url(request)}/webhooks/gitlab/{org_id}"
+
+
+def _oauth_redirect_uri(request: Request) -> str:
+    return f"{_public_base_url(request)}/gitlab/oauth/callback"
+
+
+def _frontend_url(org_id: int, **params: str) -> str:
+    origins = settings.cors_origins_list
+    base = origins[0] if origins else ""
+    query = ("?" + "&".join(f"{k}={quote(v)}" for k, v in params.items())) if params else ""
+    return f"{base}/organizations/{org_id}{query}"
 
 
 async def _get_connection(org_id: int, db: AsyncSession) -> GitLabConnection | None:
@@ -48,8 +76,9 @@ async def get_gitlab_connection(
         return GitLabConnectionOut(connected=False)
 
     return GitLabConnectionOut(
-        connected=True,
+        connected=connection.encrypted_token is not None,
         base_url=connection.base_url,
+        client_id=connection.client_id,
         gitlab_username=connection.gitlab_username,
         webhook_url=_webhook_url(org_id, request),
         webhook_secret=connection.webhook_secret,
@@ -57,50 +86,82 @@ async def get_gitlab_connection(
     )
 
 
-@router.post(
-    "/organizations/{org_id}/gitlab", response_model=GitLabConnectionOut, status_code=status.HTTP_201_CREATED
-)
-async def connect_gitlab(
+@router.post("/organizations/{org_id}/gitlab/oauth/start", response_model=GitLabOAuthStartOut)
+async def start_gitlab_oauth(
     org_id: int,
-    payload: GitLabConnect,
+    payload: GitLabOAuthStart,
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> GitLabConnectionOut:
+) -> GitLabOAuthStartOut:
     await _require_org_admin(org_id, current_user, db)
 
     base_url = payload.base_url.rstrip("/")
-    try:
-        gitlab_user = await fetch_gitlab_user(base_url, payload.token)
-    except GitLabClientError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
     connection = await _get_connection(org_id, db)
     if connection is None:
-        connection = GitLabConnection(
-            org_id=org_id,
-            base_url=base_url,
-            webhook_secret=secrets.token_urlsafe(32),
-        )
+        connection = GitLabConnection(org_id=org_id, webhook_secret=secrets.token_urlsafe(32))
         db.add(connection)
 
     connection.base_url = base_url
-    connection.auth_type = "pat"
-    connection.encrypted_token = encrypt(payload.token)
-    connection.gitlab_username = gitlab_user.get("username")
+    connection.auth_type = "oauth"
+    connection.client_id = payload.client_id
+    connection.encrypted_client_secret = encrypt(payload.client_secret)
     connection.connected_by_id = current_user.id
 
     await db.commit()
-    await db.refresh(connection)
 
-    return GitLabConnectionOut(
-        connected=True,
-        base_url=connection.base_url,
-        gitlab_username=connection.gitlab_username,
-        webhook_url=_webhook_url(org_id, request),
-        webhook_secret=connection.webhook_secret,
-        connected_at=connection.created_at,
-    )
+    redirect_uri = _oauth_redirect_uri(request)
+    state = make_state(org_id, redirect_uri)
+    authorize_url = build_authorize_url(base_url, payload.client_id, redirect_uri, state)
+
+    return GitLabOAuthStartOut(authorize_url=authorize_url)
+
+
+@router.get("/gitlab/oauth/callback")
+async def gitlab_oauth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if error:
+        # No org_id available without a valid state, so there's nowhere safe to redirect to.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=error_description or error
+        )
+    if not code or not state:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing code or state")
+
+    try:
+        claims = verify_state(state)
+    except GitLabOAuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    org_id = claims["org_id"]
+    redirect_uri = claims["redirect_uri"]
+
+    connection = await _get_connection(org_id, db)
+    if connection is None or not connection.client_id or not connection.encrypted_client_secret:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No pending GitLab connection")
+
+    try:
+        tokens = await exchange_code(
+            connection.base_url, connection.client_id, decrypt(connection.encrypted_client_secret), code, redirect_uri
+        )
+        gitlab_user = await fetch_gitlab_user(connection.base_url, tokens["access_token"])
+    except (GitLabOAuthError, GitLabClientError) as exc:
+        return RedirectResponse(_frontend_url(org_id, gitlab_error=str(exc)))
+
+    connection.encrypted_token = encrypt(tokens["access_token"])
+    connection.encrypted_refresh_token = encrypt(tokens["refresh_token"]) if tokens.get("refresh_token") else None
+    connection.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 7200))
+    connection.gitlab_username = gitlab_user.get("username")
+
+    await db.commit()
+
+    return RedirectResponse(_frontend_url(org_id, gitlab="connected"))
 
 
 @router.delete("/organizations/{org_id}/gitlab", status_code=status.HTTP_204_NO_CONTENT)

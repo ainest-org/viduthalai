@@ -145,6 +145,7 @@ export interface PMOverview {
 export interface GitLabConnection {
   connected: boolean;
   base_url: string | null;
+  client_id: string | null;
   gitlab_username: string | null;
   webhook_url: string | null;
   webhook_secret: string | null;

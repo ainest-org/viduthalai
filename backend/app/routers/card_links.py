@@ -14,8 +14,8 @@ from app.models.user import User
 from app.redis_client import cache_delete
 from app.routers.cards import _get_owned_card
 from app.schemas.card_link import CardLinkCreate, CardLinkOut
-from app.services.crypto import decrypt
 from app.services.gitlab_client import GitLabClientError, get_merge_request, parse_mr_url
+from app.services.gitlab_oauth import GitLabOAuthError, get_valid_access_token
 
 router = APIRouter(tags=["card-links"])
 
@@ -79,10 +79,9 @@ async def create_card_link(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already linked to this card")
 
     try:
-        mr = await get_merge_request(
-            connection.base_url, decrypt(connection.encrypted_token), project_path, mr_iid
-        )
-    except GitLabClientError as exc:
+        access_token = await get_valid_access_token(connection, db)
+        mr = await get_merge_request(connection.base_url, access_token, project_path, mr_iid)
+    except (GitLabOAuthError, GitLabClientError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     link = CardLink(

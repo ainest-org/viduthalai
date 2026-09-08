@@ -10,7 +10,10 @@ cp .env.prod.example .env.prod
 
 Fill in `.env.prod`: `POSTGRES_PASSWORD`, `JWT_SECRET` (`openssl rand -hex 32`), `ENCRYPTION_KEY`
 (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`),
-`CORS_ORIGINS`, and `NEXT_PUBLIC_API_URL` — all to match your real domain.
+`CORS_ORIGINS`, `NEXT_PUBLIC_API_URL`, and `PUBLIC_API_BASE_URL` — all to match your real domain.
+If you're proxying `/api/` to the backend (path-prefix style, not a subdomain),
+`PUBLIC_API_BASE_URL` is required — without it, the GitLab webhook URL and OAuth
+redirect URI the app generates will be missing the `/api` prefix and won't work.
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
@@ -43,6 +46,11 @@ location / {
 GitLab webhooks land on `/api/webhooks/gitlab/{org_id}` — the org's GitLab
 settings page shows the exact URL and secret to paste into each GitLab
 project's webhook config once this is live.
+
+GitLab is connected via OAuth: an org admin registers an OAuth application
+on their GitLab instance with redirect URI `/api/gitlab/oauth/callback` on
+this domain, then pastes its Application ID and Secret into the org's GitLab
+settings page, which redirects to GitLab to authorize.
 
 ## Redeploying after a code change
 

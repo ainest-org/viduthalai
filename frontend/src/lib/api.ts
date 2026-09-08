@@ -205,8 +205,8 @@ export const api = {
   // GitLab connection
   getGitLabConnection: (orgId: number) => request<GitLabConnection>(`/organizations/${orgId}/gitlab`),
 
-  connectGitLab: (orgId: number, data: { base_url: string; token: string }) =>
-    request<GitLabConnection>(`/organizations/${orgId}/gitlab`, {
+  startGitLabOAuth: (orgId: number, data: { base_url: string; client_id: string; client_secret: string }) =>
+    request<{ authorize_url: string }>(`/organizations/${orgId}/gitlab/oauth/start`, {
       method: "POST",
       body: JSON.stringify(data),
     }),

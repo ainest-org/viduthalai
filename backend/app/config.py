@@ -17,6 +17,13 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    # Public origin the backend is reached at from the outside, including any path
+    # prefix a reverse proxy strips before forwarding (e.g. https://example.com/api).
+    # Needed because request.base_url can't see a prefix nginx already stripped.
+    # Leave blank for setups with no prefix (e.g. dev, or the API on its own subdomain) —
+    # request.base_url is used instead.
+    public_api_base_url: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

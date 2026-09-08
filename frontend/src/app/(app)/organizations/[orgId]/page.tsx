@@ -2,8 +2,9 @@
 
 import { use, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Copy, GitBranch, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, GitBranch, Plus, Trash2 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -48,37 +49,71 @@ function CopyableField({ label, value }: { label: string; value: string }) {
   );
 }
 
+const EMPTY_CONNECTION: GitLabConnection = {
+  connected: false,
+  base_url: null,
+  client_id: null,
+  gitlab_username: null,
+  webhook_url: null,
+  webhook_secret: null,
+  connected_at: null,
+};
+
 function GitLabSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [connection, setConnection] = useState<GitLabConnection | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
-  const [token, setToken] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [redirectUri, setRedirectUri] = useState("");
+
+  function refresh() {
+    return api
+      .getGitLabConnection(orgId)
+      .then(setConnection)
+      .catch(() => setConnection(EMPTY_CONNECTION));
+  }
 
   useEffect(() => {
     if (!isAdmin) return;
-    api
-      .getGitLabConnection(orgId)
-      .then(setConnection)
-      .catch(() => setConnection({ connected: false, base_url: null, gitlab_username: null, webhook_url: null, webhook_secret: null, connected_at: null }));
+    refresh();
+    setRedirectUri(`${window.location.origin}/api/gitlab/oauth/callback`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const status = searchParams.get("gitlab");
+    const error = searchParams.get("gitlab_error");
+    if (status === "connected") {
+      toast.success("GitLab connected");
+      refresh();
+      router.replace(`/organizations/${orgId}`, { scroll: false });
+    } else if (error) {
+      toast.error(error);
+      router.replace(`/organizations/${orgId}`, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, isAdmin]);
 
   if (!isAdmin) return null;
 
   async function handleConnect(e: FormEvent) {
     e.preventDefault();
-    if (!baseUrl.trim() || !token.trim()) return;
+    if (!baseUrl.trim() || !clientId.trim() || !clientSecret.trim()) return;
     setConnecting(true);
     try {
-      const result = await api.connectGitLab(orgId, { base_url: baseUrl.trim(), token: token.trim() });
-      setConnection(result);
-      setBaseUrl("");
-      setToken("");
-      setDialogOpen(false);
-      toast.success("GitLab connected");
+      const { authorize_url } = await api.startGitLabOAuth(orgId, {
+        base_url: baseUrl.trim(),
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+      });
+      window.location.href = authorize_url;
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to connect GitLab");
-    } finally {
+      toast.error(err instanceof ApiError ? err.message : "Failed to start GitLab connection");
       setConnecting(false);
     }
   }
@@ -87,7 +122,7 @@ function GitLabSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) 
     if (!window.confirm("Disconnect GitLab? Existing linked merge requests will stop updating.")) return;
     try {
       await api.disconnectGitLab(orgId);
-      setConnection({ connected: false, base_url: null, gitlab_username: null, webhook_url: null, webhook_secret: null, connected_at: null });
+      setConnection(EMPTY_CONNECTION);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to disconnect GitLab");
     }
@@ -109,36 +144,52 @@ function GitLabSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) 
               <DialogHeader>
                 <DialogTitle>Connect a GitLab instance</DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleConnect} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="gitlab-base-url">GitLab base URL</Label>
-                  <Input
-                    id="gitlab-base-url"
-                    autoFocus
-                    placeholder="https://gitlab.example.com"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="gitlab-token">Personal access token</Label>
-                  <Input
-                    id="gitlab-token"
-                    type="password"
-                    placeholder="glpat-..."
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Needs at least the <code>read_api</code> scope. Stored encrypted.
-                  </p>
-                </div>
-                <DialogFooter>
-                  <Button type="submit" disabled={connecting}>
-                    {connecting ? "Connecting..." : "Connect"}
-                  </Button>
-                </DialogFooter>
-              </form>
+              <div className="flex flex-col gap-4">
+                <p className="text-xs text-muted-foreground">
+                  First, register an OAuth application on your GitLab instance (Admin Area → Applications,
+                  or your user Settings → Applications). Set its redirect URI to exactly this, and enable the{" "}
+                  <code>read_api</code> scope:
+                </p>
+                <CopyableField label="Redirect URI" value={redirectUri} />
+                <form onSubmit={handleConnect} className="flex flex-col gap-4 border-t border-border/60 pt-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="gitlab-base-url">GitLab base URL</Label>
+                    <Input
+                      id="gitlab-base-url"
+                      autoFocus
+                      placeholder="https://gitlab.example.com"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="gitlab-client-id">Application ID</Label>
+                    <Input
+                      id="gitlab-client-id"
+                      placeholder="from the OAuth application you just created"
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="gitlab-client-secret">Secret</Label>
+                    <Input
+                      id="gitlab-client-secret"
+                      type="password"
+                      placeholder="from the OAuth application you just created"
+                      value={clientSecret}
+                      onChange={(e) => setClientSecret(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Stored encrypted.</p>
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit" disabled={connecting}>
+                      {connecting ? "Redirecting..." : "Continue to GitLab"}
+                      <ExternalLink />
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </div>
             </DialogContent>
           </Dialog>
         )}
