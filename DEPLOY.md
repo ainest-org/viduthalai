@@ -48,9 +48,16 @@ settings page shows the exact URL and secret to paste into each GitLab
 project's webhook config once this is live.
 
 GitLab is connected via OAuth: an org admin registers an OAuth application
-on their GitLab instance with redirect URI `/api/gitlab/oauth/callback` on
-this domain, then pastes its Application ID and Secret into the org's GitLab
-settings page, which redirects to GitLab to authorize.
+on their GitLab instance, then pastes its Application ID and Secret into the
+org's GitLab settings page, which redirects to GitLab to authorize. That one
+OAuth application needs **two** redirect URIs registered on it (one per line),
+since org-connect and "Sign in with GitLab" use different callback paths:
+
+- `https://your-domain.com/api/gitlab/oauth/callback` (org admin connects GitLab)
+- `https://your-domain.com/api/auth/gitlab/callback` (users sign in with GitLab)
+
+Missing either one gives a generic "redirect URI included is not valid" error
+from GitLab for that specific flow, even if the other one works fine.
 
 ## Redeploying after a code change
 
