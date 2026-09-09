@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -8,7 +8,18 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api";
 
-export default function GitLabLoginCompletePage() {
+function Spinner() {
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-background p-4">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <Loader2 className="size-6 animate-spin" />
+        <p className="text-sm">Signing you in with GitLab...</p>
+      </div>
+    </div>
+  );
+}
+
+function GitLabLoginCompleteInner() {
   const { completeGitLabLogin } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -31,12 +42,13 @@ export default function GitLabLoginCompletePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  return <Spinner />;
+}
+
+export default function GitLabLoginCompletePage() {
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background p-4">
-      <div className="flex flex-col items-center gap-3 text-muted-foreground">
-        <Loader2 className="size-6 animate-spin" />
-        <p className="text-sm">Signing you in with GitLab...</p>
-      </div>
-    </div>
+    <Suspense fallback={<Spinner />}>
+      <GitLabLoginCompleteInner />
+    </Suspense>
   );
 }
