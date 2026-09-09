@@ -182,3 +182,48 @@ export interface GitLabIssueItem {
   project_name: string | null;
   updated_at: string | null;
 }
+
+export interface GitLabProjectSummary {
+  id: number;
+  name: string;
+  path_with_namespace: string;
+  web_url: string;
+  default_branch: string | null;
+  last_activity_at: string | null;
+  visibility: string;
+  open_issues_count: number | null;
+}
+
+export interface GitLabProjectDetail extends GitLabProjectSummary {
+  description: string | null;
+}
+
+export interface GitLabBranch {
+  name: string;
+  default: boolean;
+  protected: boolean;
+  merged: boolean;
+  web_url: string | null;
+  last_commit_message: string | null;
+  last_commit_at: string | null;
+}
+
+export interface GitLabProjectMergeRequest {
+  iid: number;
+  title: string;
+  web_url: string;
+  state: MergeRequestState;
+  author_username: string | null;
+  source_branch: string;
+  target_branch: string;
+  updated_at: string | null;
+}
+
+export interface GitLabProjectIssue {
+  iid: number;
+  title: string;
+  web_url: string;
+  state: MergeRequestState;
+  author_username: string | null;
+  updated_at: string | null;
+}

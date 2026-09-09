@@ -6,10 +6,15 @@ import type {
   CardLink,
   CardWithContext,
   Column,
+  GitLabBranch,
   GitLabConnection,
   GitLabIssueItem,
   GitLabLoginProvider,
   GitLabMergeRequestItem,
+  GitLabProjectDetail,
+  GitLabProjectIssue,
+  GitLabProjectMergeRequest,
+  GitLabProjectSummary,
   GitLabWorkStatus,
   Milestone,
   MilestoneMetrics,
@@ -239,6 +244,22 @@ export const api = {
 
   disconnectGitLab: (orgId: number) =>
     request<void>(`/organizations/${orgId}/gitlab`, { method: "DELETE" }),
+
+  // GitLab admin repo explorer
+  listGitLabOrgProjects: (orgId: number) =>
+    request<GitLabProjectSummary[]>(`/organizations/${orgId}/gitlab/projects`),
+
+  getGitLabOrgProject: (orgId: number, projectId: number) =>
+    request<GitLabProjectDetail>(`/organizations/${orgId}/gitlab/projects/${projectId}`),
+
+  listGitLabOrgProjectBranches: (orgId: number, projectId: number) =>
+    request<GitLabBranch[]>(`/organizations/${orgId}/gitlab/projects/${projectId}/branches`),
+
+  listGitLabOrgProjectMergeRequests: (orgId: number, projectId: number) =>
+    request<GitLabProjectMergeRequest[]>(`/organizations/${orgId}/gitlab/projects/${projectId}/merge-requests`),
+
+  listGitLabOrgProjectIssues: (orgId: number, projectId: number) =>
+    request<GitLabProjectIssue[]>(`/organizations/${orgId}/gitlab/projects/${projectId}/issues`),
 
   // Card links (GitLab merge requests)
   listCardLinks: (cardId: number) => request<CardLink[]>(`/cards/${cardId}/links`),

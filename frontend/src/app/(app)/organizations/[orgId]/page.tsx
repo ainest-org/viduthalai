@@ -204,9 +204,14 @@ function GitLabSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) 
                 Connected as @{connection.gitlab_username}
               </p>
             </div>
-            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDisconnect}>
-              Disconnect
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm" className="rounded-full">
+                <Link href={`/organizations/${orgId}/gitlab`}>View repositories</Link>
+              </Button>
+              <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDisconnect}>
+                Disconnect
+              </Button>
+            </div>
           </div>
           <div className="flex flex-col gap-3 border-t border-border/60 pt-3">
             <p className="text-xs text-muted-foreground">

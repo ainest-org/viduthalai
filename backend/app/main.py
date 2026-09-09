@@ -10,6 +10,7 @@ from app.routers import (
     cards,
     columns,
     gitlab,
+    gitlab_admin,
     me_gitlab,
     milestones,
     organizations,
@@ -39,6 +40,7 @@ app.include_router(gitlab.router)
 app.include_router(card_links.router)
 app.include_router(auth_gitlab.router)
 app.include_router(me_gitlab.router)
+app.include_router(gitlab_admin.router)
 
 
 @app.get("/health")
