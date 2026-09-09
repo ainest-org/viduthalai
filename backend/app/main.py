@@ -4,11 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import (
     auth,
+    auth_gitlab,
     boards,
     card_links,
     cards,
     columns,
     gitlab,
+    me_gitlab,
     milestones,
     organizations,
     pm,
@@ -35,6 +37,8 @@ app.include_router(milestones.router)
 app.include_router(pm.router)
 app.include_router(gitlab.router)
 app.include_router(card_links.router)
+app.include_router(auth_gitlab.router)
+app.include_router(me_gitlab.router)
 
 
 @app.get("/health")

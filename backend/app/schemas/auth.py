@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     email: EmailStr
     name: str
     created_at: datetime
+    gitlab_username: str | None = None
 
 
 class Token(BaseModel):

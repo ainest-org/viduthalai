@@ -11,6 +11,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, name: string, password: string) => Promise<void>;
+  completeGitLabLogin: (exchange: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -48,6 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push("/dashboard");
   }
 
+  async function completeGitLabLogin(exchange: string) {
+    const res = await api.exchangeGitLabLogin(exchange);
+    setToken(res.access_token);
+    setUser(res.user);
+    router.push("/today");
+  }
+
   function logout() {
     clearToken();
     setUser(null);
@@ -55,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, completeGitLabLogin, logout }}>
       {children}
     </AuthContext.Provider>
   );

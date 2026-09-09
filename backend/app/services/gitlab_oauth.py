@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.gitlab_connection import GitLabConnection
+from app.models.user import User
 from app.services.crypto import decrypt, encrypt
 
-_STATE_PURPOSE = "gitlab_oauth"
 _STATE_TTL_MINUTES = 10
 _DEFAULT_SCOPE = "read_api"
 
@@ -29,22 +29,21 @@ def build_authorize_url(base_url: str, client_id: str, redirect_uri: str, state:
     return f"{base_url.rstrip('/')}/oauth/authorize?{urlencode(params)}"
 
 
-def make_state(org_id: int, redirect_uri: str) -> str:
+def make_state(purpose: str, **claims: object) -> str:
     payload = {
-        "purpose": _STATE_PURPOSE,
-        "org_id": org_id,
-        "redirect_uri": redirect_uri,
+        "purpose": purpose,
+        **claims,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=_STATE_TTL_MINUTES),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def verify_state(state: str) -> dict:
+def verify_state(state: str, expected_purpose: str) -> dict:
     try:
         payload = jwt.decode(state, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError as exc:
-        raise GitLabOAuthError("That OAuth link has expired or is invalid — try connecting again") from exc
-    if payload.get("purpose") != _STATE_PURPOSE:
+        raise GitLabOAuthError("That link has expired or is invalid — try again") from exc
+    if payload.get("purpose") != expected_purpose:
         raise GitLabOAuthError("Invalid OAuth state")
     return payload
 
@@ -106,3 +105,34 @@ async def get_valid_access_token(connection: GitLabConnection, db: AsyncSession)
     if not connection.encrypted_token:
         raise GitLabOAuthError("GitLab isn't connected yet")
     return decrypt(connection.encrypted_token)
+
+
+async def get_valid_user_gitlab_token(user: User, db: AsyncSession) -> str:
+    """Same idea as get_valid_access_token, but for a user's personal GitLab login token —
+    refreshed using the OAuth app credentials of the org connection that issued it."""
+    if not user.encrypted_gitlab_token or not user.gitlab_connection_id:
+        raise GitLabOAuthError("This account isn't signed in with GitLab")
+
+    expires_soon = user.gitlab_token_expires_at is not None and user.gitlab_token_expires_at <= (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    )
+    if expires_soon:
+        connection = user.gitlab_connection
+        if not connection or not user.encrypted_gitlab_refresh_token:
+            raise GitLabOAuthError("Your GitLab session has expired — sign in with GitLab again")
+
+        refreshed = await refresh_access_token(
+            connection.base_url,
+            connection.client_id,
+            decrypt(connection.encrypted_client_secret),
+            decrypt(user.encrypted_gitlab_refresh_token),
+        )
+        user.encrypted_gitlab_token = encrypt(refreshed["access_token"])
+        if refreshed.get("refresh_token"):
+            user.encrypted_gitlab_refresh_token = encrypt(refreshed["refresh_token"])
+        user.gitlab_token_expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=refreshed.get("expires_in", 7200)
+        )
+        await db.commit()
+
+    return decrypt(user.encrypted_gitlab_token)

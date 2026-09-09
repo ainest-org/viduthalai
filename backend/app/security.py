@@ -26,3 +26,21 @@ def decode_access_token(token: str) -> str | None:
         return payload.get("sub")
     except jwt.PyJWTError:
         return None
+
+
+def create_login_exchange_code(user_id: int) -> str:
+    """A short-lived, single-purpose code handed to the frontend via a redirect after an
+    OAuth login, so the real session token never travels through a URL."""
+    expire = datetime.now(timezone.utc) + timedelta(seconds=60)
+    payload = {"sub": str(user_id), "purpose": "login_exchange", "exp": expire}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_login_exchange_code(code: str) -> str | None:
+    try:
+        payload = jwt.decode(code, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("purpose") != "login_exchange":
+        return None
+    return payload.get("sub")

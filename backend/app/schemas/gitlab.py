@@ -21,3 +21,20 @@ class GitLabConnectionOut(BaseModel):
     webhook_url: str | None = None
     webhook_secret: str | None = None
     connected_at: datetime | None = None
+
+
+class GitLabLoginProvider(BaseModel):
+    org_id: int
+    base_url: str
+
+
+class GitLabLoginStart(BaseModel):
+    org_id: int
+
+
+class GitLabLoginStartOut(BaseModel):
+    authorize_url: str
+
+
+class GitLabLoginExchange(BaseModel):
+    exchange: str = Field(min_length=1)

@@ -7,6 +7,10 @@ import type {
   CardWithContext,
   Column,
   GitLabConnection,
+  GitLabIssueItem,
+  GitLabLoginProvider,
+  GitLabMergeRequestItem,
+  GitLabWorkStatus,
   Milestone,
   MilestoneMetrics,
   OrgMember,
@@ -82,6 +86,28 @@ export const api = {
     }),
 
   me: () => request<AuthResponse["user"]>("/auth/me"),
+
+  // Sign in with GitLab
+  listGitLabLoginProviders: () => request<GitLabLoginProvider[]>("/auth/gitlab/providers"),
+
+  startGitLabLogin: (orgId: number) =>
+    request<{ authorize_url: string }>("/auth/gitlab/login/start", {
+      method: "POST",
+      body: JSON.stringify({ org_id: orgId }),
+    }),
+
+  exchangeGitLabLogin: (exchange: string) =>
+    request<AuthResponse>("/auth/gitlab/exchange", {
+      method: "POST",
+      body: JSON.stringify({ exchange }),
+    }),
+
+  // My GitLab work
+  getGitLabWorkStatus: () => request<GitLabWorkStatus>("/me/gitlab/status"),
+
+  listMyGitLabMergeRequests: () => request<GitLabMergeRequestItem[]>("/me/gitlab/merge-requests"),
+
+  listMyGitLabIssues: () => request<GitLabIssueItem[]>("/me/gitlab/issues"),
 
   listBoards: () => request<Board[]>("/boards"),
 

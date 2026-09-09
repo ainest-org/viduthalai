@@ -3,6 +3,7 @@ export interface User {
   email: string;
   name: string;
   created_at: string;
+  gitlab_username: string | null;
 }
 
 export interface AuthResponse {
@@ -150,4 +151,34 @@ export interface GitLabConnection {
   webhook_url: string | null;
   webhook_secret: string | null;
   connected_at: string | null;
+}
+
+export interface GitLabLoginProvider {
+  org_id: number;
+  base_url: string;
+}
+
+export interface GitLabWorkStatus {
+  connected: boolean;
+  gitlab_username: string | null;
+}
+
+export interface GitLabMergeRequestItem {
+  iid: number;
+  title: string;
+  web_url: string;
+  state: MergeRequestState;
+  project_name: string | null;
+  source_branch: string | null;
+  target_branch: string | null;
+  updated_at: string | null;
+}
+
+export interface GitLabIssueItem {
+  iid: number;
+  title: string;
+  web_url: string;
+  state: MergeRequestState;
+  project_name: string | null;
+  updated_at: string | null;
 }

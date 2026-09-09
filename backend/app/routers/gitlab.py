@@ -111,7 +111,7 @@ async def start_gitlab_oauth(
     await db.commit()
 
     redirect_uri = _oauth_redirect_uri(request)
-    state = make_state(org_id, redirect_uri)
+    state = make_state("gitlab_oauth", org_id=org_id, redirect_uri=redirect_uri)
     authorize_url = build_authorize_url(base_url, payload.client_id, redirect_uri, state)
 
     return GitLabOAuthStartOut(authorize_url=authorize_url)
@@ -135,7 +135,7 @@ async def gitlab_oauth_callback(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing code or state")
 
     try:
-        claims = verify_state(state)
+        claims = verify_state(state, "gitlab_oauth")
     except GitLabOAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

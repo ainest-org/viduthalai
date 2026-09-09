@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { GitMerge, ListTodo } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import type { CardWithContext } from "@/lib/types";
+import type { CardWithContext, GitLabIssueItem, GitLabMergeRequestItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { PRIORITY_META } from "@/components/kanban/card-meta";
+import { MR_STATE_META, PRIORITY_META } from "@/components/kanban/card-meta";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function todayISO(): string {
@@ -35,12 +36,23 @@ function formatDueDate(value: string): string {
 
 export default function TodayPage() {
   const [cards, setCards] = useState<CardWithContext[] | null>(null);
+  const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequestItem[] | null>(null);
+  const [issues, setIssues] = useState<GitLabIssueItem[] | null>(null);
 
   useEffect(() => {
     api
       .listMyCards()
       .then(setCards)
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load your work"));
+
+    api
+      .getGitLabWorkStatus()
+      .then((status) => {
+        if (!status.connected) return;
+        api.listMyGitLabMergeRequests().then(setMergeRequests).catch(() => setMergeRequests([]));
+        api.listMyGitLabIssues().then(setIssues).catch(() => setIssues([]));
+      })
+      .catch(() => {});
   }, []);
 
   const { overdue, dueToday } = useMemo(() => {
@@ -82,6 +94,34 @@ export default function TodayPage() {
 
       {overdue.length > 0 && <CardSection title="Overdue" tone="destructive" cards={overdue} />}
       {dueToday.length > 0 && <CardSection title="Due today" tone="default" cards={dueToday} />}
+
+      {mergeRequests && mergeRequests.length > 0 && (
+        <GitLabSection
+          title="My merge requests"
+          icon={<GitMerge className="size-3.5" />}
+          items={mergeRequests.map((mr) => ({
+            key: mr.iid,
+            title: mr.title,
+            subtitle: mr.project_name ?? undefined,
+            web_url: mr.web_url,
+            state: mr.state,
+          }))}
+        />
+      )}
+
+      {issues && issues.length > 0 && (
+        <GitLabSection
+          title="My work items"
+          icon={<ListTodo className="size-3.5" />}
+          items={issues.map((issue) => ({
+            key: issue.iid,
+            title: issue.title,
+            subtitle: issue.project_name ?? undefined,
+            web_url: issue.web_url,
+            state: issue.state,
+          }))}
+        />
+      )}
 
       {total === 0 && (
         <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
@@ -138,6 +178,51 @@ function CardSection({
               {formatDueDate(card.due_date!)}
             </span>
           </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface GitLabItem {
+  key: number;
+  title: string;
+  subtitle?: string;
+  web_url: string;
+  state: GitLabMergeRequestItem["state"];
+}
+
+function GitLabSection({ title, icon, items }: { title: string; icon: ReactNode; items: GitLabItem[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        {icon}
+        {title} <span className="font-normal">({items.length})</span>
+      </h2>
+      <div className="flex flex-col gap-2">
+        {items.map((item) => (
+          <a
+            key={item.key}
+            href={item.web_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 rounded-xl border border-border/60 bg-card p-3.5 card-shadow card-shadow-hover transition-shadow duration-200"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[14px] font-medium text-foreground">{item.title}</p>
+              {item.subtitle && (
+                <p className="truncate text-xs text-muted-foreground">{item.subtitle}</p>
+              )}
+            </div>
+            <span
+              className={cn(
+                "shrink-0 text-xs font-medium",
+                MR_STATE_META[item.state]?.text ?? "text-muted-foreground"
+              )}
+            >
+              {MR_STATE_META[item.state]?.label ?? item.state}
+            </span>
+          </a>
         ))}
       </div>
     </section>
