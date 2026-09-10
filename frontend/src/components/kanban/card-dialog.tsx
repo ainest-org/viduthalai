@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { GitMerge, Loader2, Plus, X } from "lucide-react";
+import { GitMerge, Loader2, Plus, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { CardLink, Priority } from "@/lib/types";
+import type { CardLink, Priority, ProjectPerson } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { MR_STATE_META, PRIORITY_META, PRIORITY_OPTIONS } from "@/components/kanban/card-meta";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ export function CardDialog({ state, onClose, onSubmit, submitting, onLinksChange
   const [linksLoading, setLinksLoading] = useState(false);
   const [mrUrl, setMrUrl] = useState("");
   const [linking, setLinking] = useState(false);
+  const [assignableUsers, setAssignableUsers] = useState<ProjectPerson[]>([]);
 
   useEffect(() => {
     if (state) {
@@ -70,11 +71,17 @@ export function CardDialog({ state, onClose, onSubmit, submitting, onLinksChange
         .then((fetched) => {
           setLinks(fetched);
           onLinksChange?.(cardId, fetched);
+          if (fetched.length > 0) {
+            api.listAssignableUsers(fetched[0].id).then(setAssignableUsers).catch(() => setAssignableUsers([]));
+          } else {
+            setAssignableUsers([]);
+          }
         })
         .catch(() => setLinks([]))
         .finally(() => setLinksLoading(false));
     } else {
       setLinks([]);
+      setAssignableUsers([]);
     }
     setMrUrl("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,10 +105,47 @@ export function CardDialog({ state, onClose, onSubmit, submitting, onLinksChange
         return next;
       });
       setMrUrl("");
+      if (assignableUsers.length === 0) {
+        api.listAssignableUsers(link.id).then(setAssignableUsers).catch(() => {});
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to link merge request");
     } finally {
       setLinking(false);
+    }
+  }
+
+  function updateLinkAssignees(linkId: number, assignees: CardLink["assignees"]) {
+    if (!state?.cardId) return;
+    setLinks((prev) => {
+      const next = prev.map((l) => (l.id === linkId ? { ...l, assignees } : l));
+      onLinksChange?.(state.cardId!, next);
+      return next;
+    });
+  }
+
+  async function handleAssign(linkId: number, userId: number) {
+    try {
+      const assignees = await api.addMRAssignee(linkId, userId);
+      updateLinkAssignees(linkId, assignees);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to assign");
+    }
+  }
+
+  async function handleUnassign(linkId: number, userId: number) {
+    const link = links.find((l) => l.id === linkId);
+    if (!link) return;
+    const previous = link.assignees;
+    updateLinkAssignees(
+      linkId,
+      link.assignees.filter((a) => a.user_id !== userId)
+    );
+    try {
+      await api.removeMRAssignee(linkId, userId);
+    } catch (err) {
+      updateLinkAssignees(linkId, previous);
+      toast.error(err instanceof ApiError ? err.message : "Failed to unassign");
     }
   }
 
@@ -216,42 +260,87 @@ export function CardDialog({ state, onClose, onSubmit, submitting, onLinksChange
               ) : (
                 links.length > 0 && (
                   <div className="flex flex-col gap-1.5">
-                    {links.map((link) => (
-                      <div
-                        key={link.id}
-                        className="flex items-center gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-sm"
-                      >
-                        <GitMerge
-                          className={cn(
-                            "size-3.5 shrink-0",
-                            MR_STATE_META[link.state]?.text ?? "text-muted-foreground"
-                          )}
-                        />
-                        <a
-                          href={link.mr_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="min-w-0 flex-1 truncate hover:underline"
+                    {links.map((link) => {
+                      const assignedIds = new Set(link.assignees.map((a) => a.user_id));
+                      const unassigned = assignableUsers.filter((u) => !assignedIds.has(u.user_id));
+                      return (
+                        <div
+                          key={link.id}
+                          className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-sm"
                         >
-                          !{link.mr_iid} {link.title}
-                        </a>
-                        <span
-                          className={cn(
-                            "shrink-0 text-xs font-medium",
-                            MR_STATE_META[link.state]?.text ?? "text-muted-foreground"
-                          )}
-                        >
-                          {MR_STATE_META[link.state]?.label ?? link.state}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleUnlink(link.id)}
-                          className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex items-center gap-2">
+                            <GitMerge
+                              className={cn(
+                                "size-3.5 shrink-0",
+                                MR_STATE_META[link.state]?.text ?? "text-muted-foreground"
+                              )}
+                            />
+                            <a
+                              href={link.mr_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="min-w-0 flex-1 truncate hover:underline"
+                            >
+                              !{link.mr_iid} {link.title}
+                            </a>
+                            <span
+                              className={cn(
+                                "shrink-0 text-xs font-medium",
+                                MR_STATE_META[link.state]?.text ?? "text-muted-foreground"
+                              )}
+                            >
+                              {MR_STATE_META[link.state]?.label ?? link.state}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleUnlink(link.id)}
+                              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 pl-6">
+                            {link.assignees.map((assignee) => (
+                              <span
+                                key={assignee.user_id}
+                                className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+                              >
+                                {assignee.name}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnassign(link.id, assignee.user_id)}
+                                  className="rounded-full hover:text-destructive"
+                                >
+                                  <X className="size-3" />
+                                </button>
+                              </span>
+                            ))}
+                            {unassigned.length > 0 && (
+                              <label className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-solid">
+                                <UserPlus className="size-3" />
+                                <select
+                                  value=""
+                                  onChange={(e) => {
+                                    const userId = Number(e.target.value);
+                                    if (userId) handleAssign(link.id, userId);
+                                  }}
+                                  className="bg-transparent outline-none"
+                                >
+                                  <option value="" disabled>
+                                    Assign...
+                                  </option>
+                                  {unassigned.map((u) => (
+                                    <option key={u.user_id} value={u.user_id}>
+                                      {u.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )
               )}

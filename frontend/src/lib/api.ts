@@ -19,6 +19,8 @@ import type {
   GitLabWorkStatus,
   Milestone,
   MilestoneMetrics,
+  MRAssignee,
+  Notification,
   OrgMember,
   OrgRole,
   Organization,
@@ -274,4 +276,27 @@ export const api = {
     }),
 
   deleteCardLink: (linkId: number) => request<void>(`/card-links/${linkId}`, { method: "DELETE" }),
+
+  // MR assignees
+  listAssignableUsers: (linkId: number) =>
+    request<ProjectPerson[]>(`/card-links/${linkId}/assignable-users`),
+
+  addMRAssignee: (linkId: number, userId: number) =>
+    request<MRAssignee[]>(`/card-links/${linkId}/assignees`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    }),
+
+  removeMRAssignee: (linkId: number, userId: number) =>
+    request<void>(`/card-links/${linkId}/assignees/${userId}`, { method: "DELETE" }),
+
+  // Notifications
+  listNotifications: () => request<Notification[]>("/notifications"),
+
+  getUnreadNotificationCount: () => request<{ count: number }>("/notifications/unread-count"),
+
+  markNotificationRead: (id: number) =>
+    request<void>(`/notifications/${id}/read`, { method: "POST" }),
+
+  markAllNotificationsRead: () => request<void>("/notifications/read-all", { method: "POST" }),
 };

@@ -9,13 +9,18 @@ from app.models.card import Card
 from app.models.card_link import CardLink
 from app.models.column import Column
 from app.models.gitlab_connection import GitLabConnection
+from app.models.mr_assignee import MRAssignee
 from app.models.project import Project
 from app.models.user import User
 from app.redis_client import cache_delete
 from app.routers.cards import _get_owned_card
 from app.schemas.card_link import CardLinkCreate, CardLinkOut
+from app.schemas.mr_assignee import MRAssigneeCreate, MRAssigneeOut
+from app.schemas.organization import ProjectPersonOut
 from app.services.gitlab_client import GitLabClientError, get_merge_request, parse_mr_url
 from app.services.gitlab_oauth import GitLabOAuthError, get_valid_access_token
+from app.services.notifications import notify
+from app.services.permissions import get_project_people
 
 router = APIRouter(tags=["card-links"])
 
@@ -24,15 +29,20 @@ def _board_cache_key(board_id: int) -> str:
     return f"board:{board_id}"
 
 
-async def _get_gitlab_connection_for_card(card: Card, db: AsyncSession) -> GitLabConnection:
+async def _get_project_id_for_card(card: Card, db: AsyncSession) -> int:
     project_id = await db.scalar(
         select(Board.project_id).join(Column, Column.board_id == Board.id).where(Column.id == card.column_id)
     )
     if project_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This card's board isn't linked to a project, so it has no GitLab connection",
+            detail="This card's board isn't linked to a project",
         )
+    return project_id
+
+
+async def _get_gitlab_connection_for_card(card: Card, db: AsyncSession) -> GitLabConnection:
+    project_id = await _get_project_id_for_card(card, db)
     project = await db.get(Project, project_id)
     result = await db.execute(select(GitLabConnection).where(GitLabConnection.org_id == project.org_id))
     connection = result.scalar_one_or_none()
@@ -124,3 +134,85 @@ async def delete_card_link(
     await db.commit()
     if board_id is not None:
         await cache_delete(_board_cache_key(board_id))
+
+
+async def _get_link_and_card(link_id: int, user: User, db: AsyncSession) -> tuple[CardLink, Card]:
+    link = await db.get(CardLink, link_id)
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link not found")
+    card = await _get_owned_card(link.card_id, user, db)
+    return link, card
+
+
+@router.get("/card-links/{link_id}/assignable-users", response_model=list[ProjectPersonOut])
+async def list_assignable_users(
+    link_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProjectPersonOut]:
+    _, card = await _get_link_and_card(link_id, current_user, db)
+    project_id = await _get_project_id_for_card(card, db)
+    people = await get_project_people(project_id, db)
+    return [ProjectPersonOut(user_id=p.id, name=p.name, email=p.email) for p in people]
+
+
+@router.post(
+    "/card-links/{link_id}/assignees", response_model=list[MRAssigneeOut], status_code=status.HTTP_201_CREATED
+)
+async def add_mr_assignee(
+    link_id: int,
+    payload: MRAssigneeCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MRAssignee]:
+    link, card = await _get_link_and_card(link_id, current_user, db)
+    project_id = await _get_project_id_for_card(card, db)
+
+    people = await get_project_people(project_id, db)
+    if payload.user_id not in {p.id for p in people}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="That user doesn't have access to this project"
+        )
+
+    existing = await db.execute(
+        select(MRAssignee).where(MRAssignee.card_link_id == link_id, MRAssignee.user_id == payload.user_id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already assigned")
+
+    db.add(MRAssignee(card_link_id=link_id, user_id=payload.user_id, assigned_by_id=current_user.id))
+
+    if payload.user_id != current_user.id:
+        board_id = await db.scalar(select(Column.board_id).where(Column.id == card.column_id))
+        await notify(
+            db,
+            user_id=payload.user_id,
+            type_="mr_assigned",
+            message=f'{current_user.name} assigned you to "{link.title}"',
+            link=f"/boards/{board_id}?card={card.id}" if board_id else None,
+        )
+
+    await db.commit()
+
+    result = await db.execute(select(MRAssignee).where(MRAssignee.card_link_id == link_id))
+    return list(result.scalars().all())
+
+
+@router.delete("/card-links/{link_id}/assignees/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_mr_assignee(
+    link_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await _get_link_and_card(link_id, current_user, db)
+
+    result = await db.execute(
+        select(MRAssignee).where(MRAssignee.card_link_id == link_id, MRAssignee.user_id == user_id)
+    )
+    assignee = result.scalar_one_or_none()
+    if assignee is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
+
+    await db.delete(assignee)
+    await db.commit()

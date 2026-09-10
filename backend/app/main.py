@@ -13,6 +13,7 @@ from app.routers import (
     gitlab_admin,
     me_gitlab,
     milestones,
+    notifications,
     organizations,
     pm,
     projects,
@@ -41,6 +42,7 @@ app.include_router(card_links.router)
 app.include_router(auth_gitlab.router)
 app.include_router(me_gitlab.router)
 app.include_router(gitlab_admin.router)
+app.include_router(notifications.router)
 
 
 @app.get("/health")

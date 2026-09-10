@@ -16,6 +16,8 @@ from app.models import (  # noqa: F401
     ColumnHistory,
     GitLabConnection,
     Milestone,
+    MRAssignee,
+    Notification,
     OrgMembership,
     Organization,
     Project,

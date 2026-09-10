@@ -20,6 +20,7 @@ import { useCommandPalette } from "@/lib/command-palette-context";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/notification-bell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,7 +67,7 @@ function SearchTrigger() {
     <button
       type="button"
       onClick={() => setOpen(true)}
-      className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-card px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="flex w-full items-center gap-2.5 rounded-lg border border-border/60 bg-card px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       <Search className="size-4" />
       <span className="flex-1">Search</span>
@@ -87,8 +88,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <Logo />
       </div>
 
-      <div className="px-3 pb-3">
-        <SearchTrigger />
+      <div className="flex gap-2 px-3 pb-3">
+        <div className="min-w-0 flex-1">
+          <SearchTrigger />
+        </div>
+        <NotificationBell />
       </div>
 
       <nav className="flex flex-col gap-1 px-3">

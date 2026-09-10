@@ -23,6 +23,13 @@ export type Priority = "low" | "medium" | "high";
 
 export type MergeRequestState = "opened" | "closed" | "merged" | "locked";
 
+export interface MRAssignee {
+  user_id: number;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
 export interface CardLink {
   id: number;
   card_id: number;
@@ -36,6 +43,16 @@ export interface CardLink {
   target_branch: string | null;
   author_username: string | null;
   updated_at: string;
+  assignees: MRAssignee[];
+}
+
+export interface Notification {
+  id: number;
+  type: string;
+  message: string;
+  link: string | null;
+  read: boolean;
+  created_at: string;
 }
 
 export interface Card {

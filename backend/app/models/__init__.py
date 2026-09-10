@@ -5,6 +5,8 @@ from app.models.column import Column
 from app.models.column_history import ColumnHistory
 from app.models.gitlab_connection import GitLabConnection
 from app.models.milestone import Milestone
+from app.models.mr_assignee import MRAssignee
+from app.models.notification import Notification
 from app.models.organization import Organization, OrgMembership
 from app.models.project import Project, ProjectManager, ProjectMember
 from app.models.user import User
@@ -25,4 +27,6 @@ __all__ = [
     "GitLabConnection",
     "CardLink",
     "WebhookEvent",
+    "MRAssignee",
+    "Notification",
 ]

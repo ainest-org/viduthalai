@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.mr_assignee import MRAssigneeOut
+
 
 class CardLinkCreate(BaseModel):
     mr_url: str = Field(min_length=1, max_length=1000)
@@ -22,3 +24,4 @@ class CardLinkOut(BaseModel):
     target_branch: str | None
     author_username: str | None
     updated_at: datetime
+    assignees: list[MRAssigneeOut] = []

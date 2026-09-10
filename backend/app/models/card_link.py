@@ -31,3 +31,9 @@ class CardLink(Base):
     )
 
     card: Mapped["Card"] = relationship(back_populates="links")
+    assignees: Mapped[list["MRAssignee"]] = relationship(
+        back_populates="card_link",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="MRAssignee.created_at",
+    )

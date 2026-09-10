@@ -96,6 +96,31 @@ async def require_org_admin_for_project(project_id: int, user: User, db: AsyncSe
     return project
 
 
+async def get_project_people(project_id: int, db: AsyncSession) -> list[User]:
+    """Everyone who can access this project — org admins, managers, and members —
+    the pool assignable to its cards' linked merge requests."""
+    project = await get_project_or_404(project_id, db)
+
+    admin_ids = await db.execute(
+        select(OrgMembership.user_id).where(
+            OrgMembership.org_id == project.org_id, OrgMembership.role == "admin"
+        )
+    )
+    manager_ids = await db.execute(select(ProjectManager.user_id).where(ProjectManager.project_id == project_id))
+    member_ids = await db.execute(select(ProjectMember.user_id).where(ProjectMember.project_id == project_id))
+
+    user_ids = (
+        {row[0] for row in admin_ids.all()}
+        | {row[0] for row in manager_ids.all()}
+        | {row[0] for row in member_ids.all()}
+    )
+    if not user_ids:
+        return []
+
+    result = await db.execute(select(User).where(User.id.in_(user_ids)).order_by(User.name))
+    return list(result.scalars().all())
+
+
 async def find_user_by_email(email: str, db: AsyncSession) -> User:
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
