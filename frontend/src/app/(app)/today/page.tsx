@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { GitMerge, ListTodo } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import type { CardWithContext, GitLabIssueItem, GitLabMergeRequestItem } from "@/lib/types";
+import type { CardWithContext, GitLabIssueItem, GitLabMergeRequestItem, GitLabWorkStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { MR_STATE_META, PRIORITY_META } from "@/components/kanban/card-meta";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,6 +36,7 @@ function formatDueDate(value: string): string {
 
 export default function TodayPage() {
   const [cards, setCards] = useState<CardWithContext[] | null>(null);
+  const [gitlabStatus, setGitlabStatus] = useState<GitLabWorkStatus | null>(null);
   const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequestItem[] | null>(null);
   const [issues, setIssues] = useState<GitLabIssueItem[] | null>(null);
 
@@ -48,11 +49,12 @@ export default function TodayPage() {
     api
       .getGitLabWorkStatus()
       .then((status) => {
+        setGitlabStatus(status);
         if (!status.connected) return;
         api.listMyGitLabMergeRequests().then(setMergeRequests).catch(() => setMergeRequests([]));
         api.listMyGitLabIssues().then(setIssues).catch(() => setIssues([]));
       })
-      .catch(() => {});
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load GitLab status"));
   }, []);
 
   const { overdue, dueToday } = useMemo(() => {
@@ -90,16 +92,27 @@ export default function TodayPage() {
             ? "Nothing due — you're all caught up."
             : `${total} card${total === 1 ? "" : "s"} need your attention, across all boards`}
         </p>
+        {gitlabStatus && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {gitlabStatus.connected ? (
+              <>GitLab connected as @{gitlabStatus.gitlab_username}</>
+            ) : (
+              <>GitLab not connected — sign in with GitLab from the login page to see your MRs and work items here.</>
+            )}
+          </p>
+        )}
       </div>
 
       {overdue.length > 0 && <CardSection title="Overdue" tone="destructive" cards={overdue} />}
       {dueToday.length > 0 && <CardSection title="Due today" tone="default" cards={dueToday} />}
 
-      {mergeRequests && mergeRequests.length > 0 && (
+      {gitlabStatus?.connected && (
         <GitLabSection
           title="My merge requests"
           icon={<GitMerge className="size-3.5" />}
-          items={mergeRequests.map((mr) => ({
+          loading={mergeRequests === null}
+          empty="No open merge requests assigned to you."
+          items={(mergeRequests ?? []).map((mr) => ({
             key: mr.iid,
             title: mr.title,
             subtitle: mr.project_name ?? undefined,
@@ -109,11 +122,13 @@ export default function TodayPage() {
         />
       )}
 
-      {issues && issues.length > 0 && (
+      {gitlabStatus?.connected && (
         <GitLabSection
           title="My work items"
           icon={<ListTodo className="size-3.5" />}
-          items={issues.map((issue) => ({
+          loading={issues === null}
+          empty="No open work items assigned to you."
+          items={(issues ?? []).map((issue) => ({
             key: issue.iid,
             title: issue.title,
             subtitle: issue.project_name ?? undefined,
@@ -192,13 +207,32 @@ interface GitLabItem {
   state: GitLabMergeRequestItem["state"];
 }
 
-function GitLabSection({ title, icon, items }: { title: string; icon: ReactNode; items: GitLabItem[] }) {
+function GitLabSection({
+  title,
+  icon,
+  items,
+  loading,
+  empty,
+}: {
+  title: string;
+  icon: ReactNode;
+  items: GitLabItem[];
+  loading: boolean;
+  empty: string;
+}) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         {icon}
-        {title} <span className="font-normal">({items.length})</span>
+        {title} {!loading && <span className="font-normal">({items.length})</span>}
       </h2>
+      {loading ? (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-14 rounded-xl" />
+        </div>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      ) : (
       <div className="flex flex-col gap-2">
         {items.map((item) => (
           <a
@@ -225,6 +259,7 @@ function GitLabSection({ title, icon, items }: { title: string; icon: ReactNode;
           </a>
         ))}
       </div>
+      )}
     </section>
   );
 }
