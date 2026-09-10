@@ -8,6 +8,7 @@ import type {
   Column,
   GitLabBranch,
   GitLabConnection,
+  GitLabElevatedAccess,
   GitLabIssueItem,
   GitLabLoginProvider,
   GitLabMergeRequestItem,
@@ -113,6 +114,8 @@ export const api = {
   listMyGitLabMergeRequests: () => request<GitLabMergeRequestItem[]>("/me/gitlab/merge-requests"),
 
   listMyGitLabIssues: () => request<GitLabIssueItem[]>("/me/gitlab/issues"),
+
+  getMyGitLabElevatedAccess: () => request<GitLabElevatedAccess>("/me/gitlab/elevated-access"),
 
   listBoards: () => request<Board[]>("/boards"),
 

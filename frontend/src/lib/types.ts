@@ -227,3 +227,20 @@ export interface GitLabProjectIssue {
   author_username: string | null;
   updated_at: string | null;
 }
+
+export interface GitLabElevatedRepo {
+  id: number;
+  name: string;
+  path_with_namespace: string;
+  web_url: string;
+  default_branch: string | null;
+  role: string;
+  branches: GitLabBranch[];
+  merge_requests: GitLabProjectMergeRequest[];
+  issues: GitLabProjectIssue[];
+}
+
+export interface GitLabElevatedAccess {
+  is_instance_admin: boolean;
+  repos: GitLabElevatedRepo[];
+}

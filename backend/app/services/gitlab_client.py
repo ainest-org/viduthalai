@@ -11,6 +11,24 @@ class GitLabClientError(Exception):
     pass
 
 
+GITLAB_ACCESS_LEVEL_NAMES = {10: "Guest", 20: "Reporter", 30: "Developer", 40: "Maintainer", 50: "Owner"}
+MAINTAINER_ACCESS_LEVEL = 40
+
+
+def project_access_level(project: dict) -> int | None:
+    """The effective access level GitLab reports for the token owner on this project —
+    the higher of direct project membership and access inherited from a parent group."""
+    permissions = project.get("permissions") or {}
+    project_access = (permissions.get("project_access") or {}).get("access_level")
+    group_access = (permissions.get("group_access") or {}).get("access_level")
+    levels = [lvl for lvl in (project_access, group_access) if lvl is not None]
+    return max(levels) if levels else None
+
+
+def project_access_role_name(project: dict) -> str | None:
+    return GITLAB_ACCESS_LEVEL_NAMES.get(project_access_level(project))
+
+
 def parse_mr_url(url: str) -> tuple[str, str, int]:
     """Parses a GitLab MR URL like https://gitlab.example.com/group/repo/-/merge_requests/42
     into (base_url, project_path, mr_iid)."""

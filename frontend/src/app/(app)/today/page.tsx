@@ -3,10 +3,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { GitMerge, ListTodo } from "lucide-react";
+import { ExternalLink, GitBranch, GitMerge, ListTodo, ShieldCheck } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import type { CardWithContext, GitLabIssueItem, GitLabMergeRequestItem, GitLabWorkStatus } from "@/lib/types";
+import type {
+  CardWithContext,
+  GitLabElevatedAccess,
+  GitLabIssueItem,
+  GitLabMergeRequestItem,
+  GitLabWorkStatus,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { MR_STATE_META, PRIORITY_META } from "@/components/kanban/card-meta";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,6 +45,7 @@ export default function TodayPage() {
   const [gitlabStatus, setGitlabStatus] = useState<GitLabWorkStatus | null>(null);
   const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequestItem[] | null>(null);
   const [issues, setIssues] = useState<GitLabIssueItem[] | null>(null);
+  const [elevatedAccess, setElevatedAccess] = useState<GitLabElevatedAccess | null>(null);
 
   useEffect(() => {
     api
@@ -53,9 +60,21 @@ export default function TodayPage() {
         if (!status.connected) return;
         api.listMyGitLabMergeRequests().then(setMergeRequests).catch(() => setMergeRequests([]));
         api.listMyGitLabIssues().then(setIssues).catch(() => setIssues([]));
+        api
+          .getMyGitLabElevatedAccess()
+          .then(setElevatedAccess)
+          .catch(() => setElevatedAccess({ is_instance_admin: false, repos: [] }));
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load GitLab status"));
   }, []);
+
+  const roleLabel = elevatedAccess?.is_instance_admin
+    ? "Instance Admin"
+    : elevatedAccess?.repos.some((r) => r.role === "Owner")
+      ? "Owner"
+      : elevatedAccess && elevatedAccess.repos.length > 0
+        ? "Maintainer"
+        : null;
 
   const { overdue, dueToday } = useMemo(() => {
     const today = todayISO();
@@ -101,6 +120,12 @@ export default function TodayPage() {
             )}
           </p>
         )}
+        {roleLabel && (
+          <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-foreground">
+            <ShieldCheck className="size-3.5" />
+            GitLab role: {roleLabel}
+          </p>
+        )}
       </div>
 
       {overdue.length > 0 && <CardSection title="Overdue" tone="destructive" cards={overdue} />}
@@ -136,6 +161,20 @@ export default function TodayPage() {
             state: issue.state,
           }))}
         />
+      )}
+
+      {elevatedAccess && elevatedAccess.repos.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            <ShieldCheck className="size-3.5" />
+            Repositories you maintain <span className="font-normal">({elevatedAccess.repos.length})</span>
+          </h2>
+          <div className="flex flex-col gap-3">
+            {elevatedAccess.repos.map((repo) => (
+              <ElevatedRepoCard key={repo.id} repo={repo} />
+            ))}
+          </div>
+        </section>
       )}
 
       {total === 0 && (
@@ -261,5 +300,83 @@ function GitLabSection({
       </div>
       )}
     </section>
+  );
+}
+
+function ElevatedRepoCard({ repo }: { repo: GitLabElevatedAccess["repos"][number] }) {
+  const hasActivity = repo.branches.length > 0 || repo.merge_requests.length > 0 || repo.issues.length > 0;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-4">
+      <div className="flex items-center justify-between gap-2">
+        <a
+          href={repo.web_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground hover:underline"
+        >
+          <span className="truncate">{repo.path_with_namespace}</span>
+          <ExternalLink className="size-3.5 shrink-0" />
+        </a>
+        <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+          {repo.role}
+        </span>
+      </div>
+
+      {repo.branches.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {repo.branches.map((branch) => (
+            <span
+              key={branch.name}
+              className="flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground"
+            >
+              <GitBranch className="size-3" />
+              {branch.name}
+              {branch.default && <span className="text-foreground">(default)</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {repo.merge_requests.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {repo.merge_requests.map((mr) => (
+            <a
+              key={mr.iid}
+              href={mr.web_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-xs hover:underline"
+            >
+              <GitMerge className={cn("size-3.5 shrink-0", MR_STATE_META[mr.state]?.text)} />
+              <span className="min-w-0 flex-1 truncate text-foreground">
+                !{mr.iid} {mr.title}
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {repo.issues.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {repo.issues.map((issue) => (
+            <a
+              key={issue.iid}
+              href={issue.web_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-xs hover:underline"
+            >
+              <ListTodo className={cn("size-3.5 shrink-0", MR_STATE_META[issue.state]?.text)} />
+              <span className="min-w-0 flex-1 truncate text-foreground">
+                #{issue.iid} {issue.title}
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {!hasActivity && <p className="text-xs text-muted-foreground">No open activity in this repo.</p>}
+    </div>
   );
 }
