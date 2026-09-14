@@ -52,16 +52,27 @@ export default function DashboardPage() {
       .listOrganizations()
       .then(async (orgs) => {
         const adminOrgs = orgs.filter((o) => o.role === "admin");
-        const results = await Promise.all(
+        const settled = await Promise.allSettled(
           adminOrgs.map(async (org) => ({
             orgId: org.id,
             orgName: org.name,
             workload: await api.getTeamWorkload(org.id),
           }))
         );
+        const results = settled
+          .filter((r): r is PromiseFulfilledResult<{ orgId: number; orgName: string; workload: TeamWorkload }> =>
+            r.status === "fulfilled"
+          )
+          .map((r) => r.value);
+        const failures = settled.filter((r) => r.status === "rejected");
+        if (failures.length > 0) {
+          toast.error(
+            `Failed to load team workload for ${failures.length} organization${failures.length === 1 ? "" : "s"}`
+          );
+        }
         setTeamWorkloads(results);
       })
-      .catch(() => setTeamWorkloads([]));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load organizations"));
   }, []);
 
   useEffect(() => {
