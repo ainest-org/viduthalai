@@ -245,6 +245,30 @@ export interface GitLabProjectIssue {
   updated_at: string | null;
 }
 
+export interface WorkItem {
+  type: "merge_request" | "issue";
+  title: string;
+  web_url: string;
+  state: MergeRequestState;
+  project_name: string | null;
+  source: "gitlab" | "viduthalai";
+}
+
+export interface DeveloperWorkload {
+  source: "viduthalai" | "gitlab_only";
+  user_id: number | null;
+  name: string;
+  email: string | null;
+  gitlab_username: string | null;
+  role: OrgRole | null;
+  items: WorkItem[];
+}
+
+export interface TeamWorkload {
+  gitlab_connected: boolean;
+  developers: DeveloperWorkload[];
+}
+
 export interface GitLabElevatedRepo {
   id: number;
   name: string;

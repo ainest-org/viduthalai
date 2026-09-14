@@ -30,6 +30,7 @@ import type {
   Project,
   ProjectDetail,
   ProjectPerson,
+  TeamWorkload,
 } from "@/lib/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -299,4 +300,7 @@ export const api = {
     request<void>(`/notifications/${id}/read`, { method: "POST" }),
 
   markAllNotificationsRead: () => request<void>("/notifications/read-all", { method: "POST" }),
+
+  // Team workload
+  getTeamWorkload: (orgId: number) => request<TeamWorkload>(`/organizations/${orgId}/team-workload`),
 };

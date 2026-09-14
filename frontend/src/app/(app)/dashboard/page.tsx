@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from "r
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Pin, Plus } from "lucide-react";
+import { GitBranch, GitMerge, ListTodo, Pin, Plus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import type { Board, CardWithContext } from "@/lib/types";
+import type { Board, CardWithContext, DeveloperWorkload, TeamWorkload } from "@/lib/types";
 import { dotColorForStatus } from "@/lib/status-colors";
 import { getPinnedBoardIds, getRecentBoardIds, togglePinnedBoard } from "@/lib/board-prefs";
 import { cn } from "@/lib/utils";
+import { MR_STATE_META } from "@/components/kanban/card-meta";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,9 @@ export default function DashboardPage() {
   const [name, setName] = useState("");
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [teamWorkloads, setTeamWorkloads] = useState<{ orgId: number; orgName: string; workload: TeamWorkload }[] | null>(
+    null
+  );
 
   useEffect(() => {
     Promise.all([api.listBoards(), api.listMyCards()])
@@ -43,6 +47,21 @@ export default function DashboardPage() {
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load dashboard"));
     setPinnedIds(getPinnedBoardIds());
     setRecentIds(getRecentBoardIds());
+
+    api
+      .listOrganizations()
+      .then(async (orgs) => {
+        const adminOrgs = orgs.filter((o) => o.role === "admin");
+        const results = await Promise.all(
+          adminOrgs.map(async (org) => ({
+            orgId: org.id,
+            orgName: org.name,
+            workload: await api.getTeamWorkload(org.id),
+          }))
+        );
+        setTeamWorkloads(results);
+      })
+      .catch(() => setTeamWorkloads([]));
   }, []);
 
   useEffect(() => {
@@ -140,6 +159,14 @@ export default function DashboardPage() {
         </Dialog>
       </div>
 
+      {teamWorkloads && teamWorkloads.length > 0 && (
+        <div className="flex flex-col gap-6">
+          {teamWorkloads.map(({ orgId, orgName, workload }) => (
+            <TeamWorkloadSection key={orgId} orgName={orgName} workload={workload} />
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -223,6 +250,92 @@ export default function DashboardPage() {
             })}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function initials(name: string): string {
+  return name
+    .split(/[\s_]+/)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function TeamWorkloadSection({ orgName, workload }: { orgName: string; workload: TeamWorkload }) {
+  const busiest = [...workload.developers].sort((a, b) => b.items.length - a.items.length);
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          {orgName} — team workload
+        </h2>
+        {!workload.gitlab_connected && (
+          <span className="text-xs text-muted-foreground">GitLab not connected</span>
+        )}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {busiest.map((dev) => (
+          <DeveloperCard key={dev.user_id ?? dev.gitlab_username ?? dev.name} developer={dev} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DeveloperCard({ developer }: { developer: DeveloperWorkload }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-4 card-shadow">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
+            {initials(developer.name)}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{developer.name}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {developer.source === "gitlab_only" ? (
+                <span className="flex items-center gap-1">
+                  <GitBranch className="size-3" />
+                  GitLab only
+                </span>
+              ) : (
+                <>
+                  {developer.role}
+                  {developer.gitlab_username && ` · @${developer.gitlab_username}`}
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+          {developer.items.length}
+        </span>
+      </div>
+
+      {developer.items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No open work items.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {developer.items.map((item, i) => {
+            const Icon = item.type === "merge_request" ? GitMerge : ListTodo;
+            return (
+              <a
+                key={i}
+                href={item.web_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-xs hover:underline"
+              >
+                <Icon className={cn("size-3.5 shrink-0", MR_STATE_META[item.state]?.text)} />
+                <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+              </a>
+            );
+          })}
+        </div>
       )}
     </div>
   );

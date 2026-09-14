@@ -18,6 +18,7 @@ from app.routers import (
     organizations,
     pm,
     projects,
+    team_workload,
 )
 
 app = FastAPI(title="Viduthalai API")
@@ -45,6 +46,7 @@ app.include_router(auth_gitlab.router)
 app.include_router(me_gitlab.router)
 app.include_router(gitlab_admin.router)
 app.include_router(notifications.router)
+app.include_router(team_workload.router)
 
 
 @app.get("/health")
