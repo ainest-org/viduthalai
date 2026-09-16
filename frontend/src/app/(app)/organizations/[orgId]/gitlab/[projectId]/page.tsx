@@ -13,7 +13,7 @@ import type {
   GitLabProjectMergeRequest,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { MR_STATE_META } from "@/components/kanban/card-meta";
+import { MR_STATE_META } from "@/lib/gitlab-meta";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type Tab = "merge_requests" | "issues" | "branches";

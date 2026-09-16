@@ -12,7 +12,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 
 export const metadata: Metadata = {
   title: "Viduthalai",
-  description: "A simple project management tool with kanban boards",
+  description: "A project management tool backed by your GitLab repos",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

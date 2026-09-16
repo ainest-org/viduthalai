@@ -6,17 +6,11 @@ from app.config import settings
 from app.routers import (
     auth,
     auth_gitlab,
-    boards,
-    card_links,
-    cards,
-    columns,
+    dashboard,
     gitlab,
     gitlab_admin,
     me_gitlab,
-    milestones,
-    notifications,
     organizations,
-    pm,
     projects,
     team_workload,
 )
@@ -33,20 +27,14 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=512)
 
 app.include_router(auth.router)
-app.include_router(boards.router)
-app.include_router(columns.router)
-app.include_router(cards.router)
 app.include_router(organizations.router)
 app.include_router(projects.router)
-app.include_router(milestones.router)
-app.include_router(pm.router)
 app.include_router(gitlab.router)
-app.include_router(card_links.router)
 app.include_router(auth_gitlab.router)
 app.include_router(me_gitlab.router)
 app.include_router(gitlab_admin.router)
-app.include_router(notifications.router)
 app.include_router(team_workload.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health")

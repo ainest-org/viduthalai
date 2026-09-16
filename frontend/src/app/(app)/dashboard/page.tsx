@@ -1,52 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { GitBranch, GitMerge, ListTodo, Pin, Plus } from "lucide-react";
+import { ExternalLink, FolderGit2, GitBranch, GitMerge, ListTodo } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import type { Board, CardWithContext, DeveloperWorkload, TeamWorkload } from "@/lib/types";
-import { dotColorForStatus } from "@/lib/status-colors";
-import { getPinnedBoardIds, getRecentBoardIds, togglePinnedBoard } from "@/lib/board-prefs";
+import type { DashboardProject, DeveloperWorkload, TeamWorkload } from "@/lib/types";
+import { MR_STATE_META } from "@/lib/gitlab-meta";
 import { cn } from "@/lib/utils";
-import { MR_STATE_META } from "@/components/kanban/card-meta";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [boards, setBoards] = useState<Board[] | null>(null);
-  const [cards, setCards] = useState<CardWithContext[] | null>(null);
-  const [pinnedIds, setPinnedIds] = useState<number[]>([]);
-  const [recentIds, setRecentIds] = useState<number[]>([]);
-  const [name, setName] = useState("");
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [projects, setProjects] = useState<DashboardProject[] | null>(null);
   const [teamWorkloads, setTeamWorkloads] = useState<{ orgId: number; orgName: string; workload: TeamWorkload }[] | null>(
     null
   );
 
   useEffect(() => {
-    Promise.all([api.listBoards(), api.listMyCards()])
-      .then(([boardsRes, cardsRes]) => {
-        setBoards(boardsRes);
-        setCards(cardsRes);
-      })
+    api
+      .getDashboardProjects()
+      .then(setProjects)
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load dashboard"));
-    setPinnedIds(getPinnedBoardIds());
-    setRecentIds(getRecentBoardIds());
 
     api
       .listOrganizations()
@@ -75,100 +50,36 @@ export default function DashboardPage() {
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load organizations"));
   }, []);
 
-  useEffect(() => {
-    if (searchParams.get("new") === "1") {
-      setOpen(true);
-      router.replace("/dashboard", { scroll: false });
-    }
-  }, [searchParams, router]);
-
-  const countsByBoard = useMemo(() => {
-    const map = new Map<number, Map<string, number>>();
-    for (const card of cards ?? []) {
-      const boardCounts = map.get(card.board_id) ?? new Map<string, number>();
-      boardCounts.set(card.column_name, (boardCounts.get(card.column_name) ?? 0) + 1);
-      map.set(card.board_id, boardCounts);
-    }
-    return map;
-  }, [cards]);
-
-  const orderedBoards = useMemo(() => {
-    if (!boards) return [];
-    const pinnedSet = new Set(pinnedIds);
-    const pinned = boards.filter((b) => pinnedSet.has(b.id));
-    const rest = boards.filter((b) => !pinnedSet.has(b.id));
-    return [...pinned, ...rest];
-  }, [boards, pinnedIds]);
-
-  const recentBoards = useMemo(() => {
-    if (!boards) return [];
-    const pinnedSet = new Set(pinnedIds);
-    const byId = new Map(boards.map((b) => [b.id, b]));
-    return recentIds
-      .filter((id) => !pinnedSet.has(id))
-      .map((id) => byId.get(id))
-      .filter((b): b is Board => Boolean(b));
-  }, [boards, recentIds, pinnedIds]);
-
-  function handleTogglePin(e: MouseEvent, boardId: number) {
-    e.preventDefault();
-    e.stopPropagation();
-    setPinnedIds(togglePinnedBoard(boardId));
-  }
-
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setCreating(true);
-    try {
-      const board = await api.createBoard({ name: name.trim() });
-      setBoards((prev) => [...(prev ?? []), board]);
-      setName("");
-      setOpen(false);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to create board");
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  const loading = boards === null || cards === null;
+  const loading = projects === null;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 sm:px-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">All your boards, at a glance</p>
-        </div>
-
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="rounded-full px-4">
-              <Plus />
-              New board
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create a new board</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreate} className="flex flex-col gap-4">
-              <Input
-                autoFocus
-                placeholder="Board name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <DialogFooter>
-                <Button type="submit" disabled={creating}>
-                  {creating ? "Creating..." : "Create board"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">Your projects and what&apos;s open in each repo</p>
       </div>
+
+      {loading ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-48 rounded-2xl" />
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No projects yet.{" "}
+          <Link href="/organizations" className="font-medium text-foreground underline underline-offset-4">
+            Create one from an organization
+          </Link>{" "}
+          once GitLab is connected.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {projects.map((project) => (
+            <ProjectCard key={project.id} project={project} />
+          ))}
+        </div>
+      )}
 
       {teamWorkloads && teamWorkloads.length > 0 && (
         <div className="flex flex-col gap-6">
@@ -177,90 +88,84 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
 
-      {loading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-36 rounded-2xl" />
-          ))}
+function ProjectCard({ project }: { project: DashboardProject }) {
+  const totalOpen = project.merge_requests.length + project.issues.length;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-5 card-shadow">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <Link
+            href={`/organizations/${project.org_id}/projects/${project.id}`}
+            className="text-[15px] font-semibold tracking-tight hover:underline"
+          >
+            {project.name}
+          </Link>
+          <p className="truncate text-xs text-muted-foreground">{project.org_name}</p>
         </div>
-      ) : boards.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No boards yet. Create your first one to get started.
-        </p>
+        {!project.gitlab_error && (
+          <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+            {totalOpen} open
+          </span>
+        )}
+      </div>
+
+      {project.gitlab_web_url && (
+        <a
+          href={project.gitlab_web_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          <GitBranch className="size-3.5 shrink-0" />
+          <span className="truncate">{project.gitlab_project_path}</span>
+          <ExternalLink className="size-3 shrink-0" />
+        </a>
+      )}
+
+      {project.gitlab_error ? (
+        <p className="text-xs text-muted-foreground">{project.gitlab_error}</p>
+      ) : totalOpen === 0 ? (
+        <p className="text-xs text-muted-foreground">No open merge requests or work items.</p>
       ) : (
-        <>
-          {recentBoards.length > 0 && (
-            <div className="flex flex-col gap-2.5">
-              <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                Recently viewed
-              </h2>
-              <div className="scroll-thin flex gap-3 overflow-x-auto pb-1">
-                {recentBoards.map((board) => (
-                  <Link
-                    key={board.id}
-                    href={`/boards/${board.id}`}
-                    className="shrink-0 rounded-xl border border-border/60 bg-card px-4 py-2.5 text-sm font-medium card-shadow card-shadow-hover transition-shadow duration-200"
-                  >
-                    {board.name}
-                  </Link>
-                ))}
-              </div>
-            </div>
+        <div className="flex flex-col gap-1.5">
+          {project.merge_requests.slice(0, 4).map((mr) => (
+            <a
+              key={`mr-${mr.iid}`}
+              href={mr.web_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-xs hover:underline"
+            >
+              <GitMerge className={cn("size-3.5 shrink-0", MR_STATE_META[mr.state]?.text)} />
+              <span className="min-w-0 flex-1 truncate text-foreground">{mr.title}</span>
+            </a>
+          ))}
+          {project.issues.slice(0, 4).map((issue) => (
+            <a
+              key={`issue-${issue.iid}`}
+              href={issue.web_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-xs hover:underline"
+            >
+              <ListTodo className={cn("size-3.5 shrink-0", MR_STATE_META[issue.state]?.text)} />
+              <span className="min-w-0 flex-1 truncate text-foreground">{issue.title}</span>
+            </a>
+          ))}
+          {totalOpen > 8 && (
+            <Link
+              href={`/organizations/${project.org_id}/projects/${project.id}`}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              View all {totalOpen}
+            </Link>
           )}
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {orderedBoards.map((board) => {
-              const statusCounts = Array.from(countsByBoard.get(board.id)?.entries() ?? []);
-              const totalCards = statusCounts.reduce((sum, [, count]) => sum + count, 0);
-              const pinned = pinnedIds.includes(board.id);
-
-              return (
-                <Link
-                  key={board.id}
-                  href={`/boards/${board.id}`}
-                  className="block rounded-2xl border border-border/60 bg-card p-5 card-shadow card-shadow-hover transition-shadow duration-200"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h2 className="text-[15px] font-semibold tracking-tight">{board.name}</h2>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={(e) => handleTogglePin(e, board.id)}
-                        aria-label={pinned ? "Unpin board" : "Pin board"}
-                        className={cn(
-                          "rounded-md p-1 transition-colors hover:bg-accent",
-                          pinned ? "text-primary" : "text-muted-foreground"
-                        )}
-                      >
-                        <Pin className={cn("size-3.5", pinned && "fill-current")} />
-                      </button>
-                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
-                        {totalCards} card{totalCards === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {statusCounts.length > 0 ? (
-                    <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
-                      {statusCounts.map(([status, count]) => (
-                        <div key={status} className="flex items-center gap-1.5 text-sm">
-                          <span
-                            className={cn("size-2 shrink-0 rounded-full", dotColorForStatus(status))}
-                          />
-                          <span className="font-medium text-foreground">{count}</span>
-                          <span className="text-muted-foreground">{status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-4 text-sm text-muted-foreground">No cards yet</p>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -310,7 +215,7 @@ function DeveloperCard({ developer }: { developer: DeveloperWorkload }) {
             <p className="truncate text-xs text-muted-foreground">
               {developer.source === "gitlab_only" ? (
                 <span className="flex items-center gap-1">
-                  <GitBranch className="size-3" />
+                  <FolderGit2 className="size-3" />
                   GitLab only
                 </span>
               ) : (

@@ -18,8 +18,6 @@ class GitLabConnectionOut(BaseModel):
     base_url: str | None = None
     client_id: str | None = None
     gitlab_username: str | None = None
-    webhook_url: str | None = None
-    webhook_secret: str | None = None
     connected_at: datetime | None = None
 
 

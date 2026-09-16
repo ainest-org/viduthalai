@@ -26,7 +26,6 @@ class User(Base):
     encrypted_gitlab_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     gitlab_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    boards: Mapped[list["Board"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     gitlab_connection: Mapped["GitLabConnection | None"] = relationship(
         lazy="selectin", foreign_keys=[gitlab_connection_id]
     )

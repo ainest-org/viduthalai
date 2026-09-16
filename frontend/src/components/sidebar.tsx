@@ -11,7 +11,6 @@ import {
   Menu,
   Search,
   Trello,
-  Users,
   X,
 } from "lucide-react";
 
@@ -20,7 +19,6 @@ import { useCommandPalette } from "@/lib/command-palette-context";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { NotificationBell } from "@/components/notification-bell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +38,6 @@ function initials(name: string): string {
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "My work today", icon: CalendarClock },
-  { href: "/team", label: "Team", icon: Users },
   { href: "/organizations", label: "Organizations", icon: Building2 },
 ];
 
@@ -92,7 +89,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="min-w-0 flex-1">
           <SearchTrigger />
         </div>
-        <NotificationBell />
       </div>
 
       <nav className="flex flex-col gap-1 px-3">

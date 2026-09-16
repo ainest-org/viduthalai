@@ -1,11 +1,6 @@
 import type {
   AuthResponse,
-  Board,
-  BoardDetail,
-  Card,
-  CardLink,
-  CardWithContext,
-  Column,
+  DashboardProject,
   GitLabBranch,
   GitLabConnection,
   GitLabElevatedAccess,
@@ -17,19 +12,14 @@ import type {
   GitLabProjectMergeRequest,
   GitLabProjectSummary,
   GitLabWorkStatus,
-  Milestone,
-  MilestoneMetrics,
-  MRAssignee,
-  Notification,
   OrgMember,
   OrgRole,
   Organization,
   OrganizationWithRole,
-  PMOverview,
-  Priority,
   Project,
   ProjectDetail,
   ProjectPerson,
+  ProjectWorkItems,
   TeamWorkload,
 } from "@/lib/types";
 
@@ -120,61 +110,6 @@ export const api = {
 
   getMyGitLabElevatedAccess: () => request<GitLabElevatedAccess>("/me/gitlab/elevated-access"),
 
-  listBoards: () => request<Board[]>("/boards"),
-
-  createBoard: (data: { name: string; project_id?: number | null }) =>
-    request<Board>("/boards", { method: "POST", body: JSON.stringify(data) }),
-
-  getBoard: (id: number) => request<BoardDetail>(`/boards/${id}`),
-
-  updateBoard: (id: number, data: { name?: string; project_id?: number | null }) =>
-    request<Board>(`/boards/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-
-  deleteBoard: (id: number) => request<void>(`/boards/${id}`, { method: "DELETE" }),
-
-  createColumn: (boardId: number, name: string) =>
-    request<Column>(`/boards/${boardId}/columns`, {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-
-  updateColumn: (id: number, data: { name?: string; position?: number }) =>
-    request<Column>(`/columns/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-
-  deleteColumn: (id: number) => request<void>(`/columns/${id}`, { method: "DELETE" }),
-
-  createCard: (
-    columnId: number,
-    data: {
-      title: string;
-      description?: string;
-      due_date?: string | null;
-      priority?: Priority | null;
-      milestone_id?: number | null;
-    }
-  ) =>
-    request<Card>(`/columns/${columnId}/cards`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  updateCard: (
-    id: number,
-    data: {
-      title?: string;
-      description?: string | null;
-      due_date?: string | null;
-      priority?: Priority | null;
-      milestone_id?: number | null;
-      column_id?: number;
-      position?: number;
-    }
-  ) => request<Card>(`/cards/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-
-  deleteCard: (id: number) => request<void>(`/cards/${id}`, { method: "DELETE" }),
-
-  listMyCards: () => request<CardWithContext[]>("/cards"),
-
   // Organizations
   listOrganizations: () => request<OrganizationWithRole[]>("/organizations"),
 
@@ -194,16 +129,16 @@ export const api = {
 
   listOrgProjects: (orgId: number) => request<Project[]>(`/organizations/${orgId}/projects`),
 
-  createProject: (orgId: number, name: string) =>
+  createProject: (orgId: number, data: { gitlab_project_id: number; name?: string }) =>
     request<Project>(`/organizations/${orgId}/projects`, {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(data),
     }),
 
   // Projects
   getProject: (projectId: number) => request<ProjectDetail>(`/projects/${projectId}`),
 
-  listProjectBoards: (projectId: number) => request<Board[]>(`/projects/${projectId}/boards`),
+  getProjectWorkItems: (projectId: number) => request<ProjectWorkItems>(`/projects/${projectId}/work-items`),
 
   addProjectManager: (projectId: number, email: string) =>
     request<ProjectPerson>(`/projects/${projectId}/managers`, {
@@ -223,22 +158,6 @@ export const api = {
   removeProjectMember: (projectId: number, userId: number) =>
     request<void>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
 
-  // Milestones
-  listMilestones: (projectId: number) =>
-    request<MilestoneMetrics[]>(`/projects/${projectId}/milestones`),
-
-  createMilestone: (projectId: number, data: { title: string; due_date?: string | null; description?: string }) =>
-    request<Milestone>(`/projects/${projectId}/milestones`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  deleteMilestone: (milestoneId: number) =>
-    request<void>(`/milestones/${milestoneId}`, { method: "DELETE" }),
-
-  // PM overview
-  getPMOverview: () => request<PMOverview>("/pm/overview"),
-
   // GitLab connection
   getGitLabConnection: (orgId: number) => request<GitLabConnection>(`/organizations/${orgId}/gitlab`),
 
@@ -251,7 +170,7 @@ export const api = {
   disconnectGitLab: (orgId: number) =>
     request<void>(`/organizations/${orgId}/gitlab`, { method: "DELETE" }),
 
-  // GitLab admin repo explorer
+  // GitLab admin repo explorer (also used to pick a repo when creating a project)
   listGitLabOrgProjects: (orgId: number) =>
     request<GitLabProjectSummary[]>(`/organizations/${orgId}/gitlab/projects`),
 
@@ -267,40 +186,9 @@ export const api = {
   listGitLabOrgProjectIssues: (orgId: number, projectId: number) =>
     request<GitLabProjectIssue[]>(`/organizations/${orgId}/gitlab/projects/${projectId}/issues`),
 
-  // Card links (GitLab merge requests)
-  listCardLinks: (cardId: number) => request<CardLink[]>(`/cards/${cardId}/links`),
-
-  createCardLink: (cardId: number, mrUrl: string) =>
-    request<CardLink>(`/cards/${cardId}/links`, {
-      method: "POST",
-      body: JSON.stringify({ mr_url: mrUrl }),
-    }),
-
-  deleteCardLink: (linkId: number) => request<void>(`/card-links/${linkId}`, { method: "DELETE" }),
-
-  // MR assignees
-  listAssignableUsers: (linkId: number) =>
-    request<ProjectPerson[]>(`/card-links/${linkId}/assignable-users`),
-
-  addMRAssignee: (linkId: number, userId: number) =>
-    request<MRAssignee[]>(`/card-links/${linkId}/assignees`, {
-      method: "POST",
-      body: JSON.stringify({ user_id: userId }),
-    }),
-
-  removeMRAssignee: (linkId: number, userId: number) =>
-    request<void>(`/card-links/${linkId}/assignees/${userId}`, { method: "DELETE" }),
-
-  // Notifications
-  listNotifications: () => request<Notification[]>("/notifications"),
-
-  getUnreadNotificationCount: () => request<{ count: number }>("/notifications/unread-count"),
-
-  markNotificationRead: (id: number) =>
-    request<void>(`/notifications/${id}/read`, { method: "POST" }),
-
-  markAllNotificationsRead: () => request<void>("/notifications/read-all", { method: "POST" }),
-
   // Team workload
   getTeamWorkload: (orgId: number) => request<TeamWorkload>(`/organizations/${orgId}/team-workload`),
+
+  // Dashboard
+  getDashboardProjects: () => request<DashboardProject[]>("/dashboard/projects"),
 };

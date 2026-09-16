@@ -8,7 +8,7 @@ import { Check, Copy, ExternalLink, GitBranch, Plus, Trash2 } from "lucide-react
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { GitLabConnection, OrgMember, OrgRole, Project } from "@/lib/types";
+import type { GitLabConnection, GitLabProjectSummary, OrgMember, OrgRole, Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,8 +54,6 @@ const EMPTY_CONNECTION: GitLabConnection = {
   base_url: null,
   client_id: null,
   gitlab_username: null,
-  webhook_url: null,
-  webhook_secret: null,
   connected_at: null,
 };
 
@@ -213,20 +211,10 @@ function GitLabSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) 
               </Button>
             </div>
           </div>
-          <div className="flex flex-col gap-3 border-t border-border/60 pt-3">
-            <p className="text-xs text-muted-foreground">
-              Add a webhook in each GitLab project (Settings → Webhooks) with these values, triggered on
-              merge request events, so linked cards stay up to date automatically.
-            </p>
-            {connection.webhook_url && <CopyableField label="Webhook URL" value={connection.webhook_url} />}
-            {connection.webhook_secret && (
-              <CopyableField label="Secret token" value={connection.webhook_secret} />
-            )}
-          </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Not connected. Link a self-hosted GitLab instance to attach merge requests to cards.
+          Not connected. Link a self-hosted GitLab instance to create projects from its repos.
         </p>
       )}
     </section>
@@ -246,9 +234,10 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
 
-  const [projectName, setProjectName] = useState("");
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [creatingProject, setCreatingProject] = useState(false);
+  const [availableRepos, setAvailableRepos] = useState<GitLabProjectSummary[] | null>(null);
+  const [reposError, setReposError] = useState<string | null>(null);
+  const [creatingRepoId, setCreatingRepoId] = useState<number | null>(null);
 
   useEffect(() => {
     api
@@ -292,19 +281,28 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
     }
   }
 
-  async function handleCreateProject(e: FormEvent) {
-    e.preventDefault();
-    if (!projectName.trim()) return;
-    setCreatingProject(true);
+  function openProjectDialog() {
+    setProjectDialogOpen(true);
+    setAvailableRepos(null);
+    setReposError(null);
+    api
+      .listGitLabOrgProjects(orgId)
+      .then(setAvailableRepos)
+      .catch((err) =>
+        setReposError(err instanceof ApiError ? err.message : "Failed to load GitLab repositories")
+      );
+  }
+
+  async function handleSelectRepo(repo: GitLabProjectSummary) {
+    setCreatingRepoId(repo.id);
     try {
-      const project = await api.createProject(orgId, projectName.trim());
+      const project = await api.createProject(orgId, { gitlab_project_id: repo.id });
       setProjects((prev) => [...(prev ?? []), project]);
-      setProjectName("");
       setProjectDialogOpen(false);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to create project");
     } finally {
-      setCreatingProject(false);
+      setCreatingRepoId(null);
     }
   }
 
@@ -417,7 +415,13 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold tracking-tight">Projects</h2>
               {isAdmin && (
-                <Dialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen}>
+                <Dialog
+                  open={projectDialogOpen}
+                  onOpenChange={(next) => {
+                    setProjectDialogOpen(next);
+                    if (next) openProjectDialog();
+                  }}
+                >
                   <DialogTrigger asChild>
                     <Button size="sm" variant="outline" className="rounded-full">
                       <Plus />
@@ -426,21 +430,48 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Create a project</DialogTitle>
+                      <DialogTitle>Create a project from a GitLab repo</DialogTitle>
                     </DialogHeader>
-                    <form onSubmit={handleCreateProject} className="flex flex-col gap-4">
-                      <Input
-                        autoFocus
-                        placeholder="Project name"
-                        value={projectName}
-                        onChange={(e) => setProjectName(e.target.value)}
-                      />
-                      <DialogFooter>
-                        <Button type="submit" disabled={creatingProject}>
-                          {creatingProject ? "Creating..." : "Create project"}
-                        </Button>
-                      </DialogFooter>
-                    </form>
+                    {reposError ? (
+                      <p className="text-sm text-muted-foreground">
+                        {reposError}
+                        {reposError.toLowerCase().includes("gitlab") && " Connect GitLab above first."}
+                      </p>
+                    ) : availableRepos === null ? (
+                      <div className="flex flex-col gap-2">
+                        <Skeleton className="h-12 rounded-xl" />
+                        <Skeleton className="h-12 rounded-xl" />
+                      </div>
+                    ) : (
+                      (() => {
+                        const usedIds = new Set(
+                          (projects ?? []).map((p) => p.gitlab_project_id).filter((id): id is number => id !== null)
+                        );
+                        const selectable = availableRepos.filter((repo) => !usedIds.has(repo.id));
+                        return selectable.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            No more repositories available — every repo GitLab can see is already a project.
+                          </p>
+                        ) : (
+                          <div className="scroll-thin flex max-h-80 flex-col gap-2 overflow-y-auto">
+                            {selectable.map((repo) => (
+                              <button
+                                key={repo.id}
+                                type="button"
+                                disabled={creatingRepoId !== null}
+                                onClick={() => handleSelectRepo(repo)}
+                                className="flex flex-col gap-0.5 rounded-xl border border-border/60 bg-card px-4 py-2.5 text-left transition-colors hover:bg-accent disabled:opacity-50"
+                              >
+                                <span className="text-sm font-medium">{repo.name}</span>
+                                <span className="truncate text-xs text-muted-foreground">
+                                  {repo.path_with_namespace}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()
+                    )}
                   </DialogContent>
                 </Dialog>
               )}
@@ -457,6 +488,9 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
                     className="block rounded-xl border border-border/60 bg-card p-4 card-shadow card-shadow-hover transition-shadow duration-200"
                   >
                     <p className="text-sm font-medium">{project.name}</p>
+                    {project.gitlab_project_path && (
+                      <p className="truncate text-xs text-muted-foreground">{project.gitlab_project_path}</p>
+                    )}
                   </Link>
                 ))}
               </div>

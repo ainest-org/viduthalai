@@ -4,12 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models.board import Board
 from app.models.project import ProjectManager, ProjectMember
 from app.models.user import User
-from app.schemas.board import BoardOut
+from app.routers.gitlab import _get_connection
+from app.schemas.gitlab_admin import GitLabProjectIssueOut, GitLabProjectMergeRequestOut, ProjectWorkItemsOut
 from app.schemas.organization import ProjectPersonOut
 from app.schemas.project import AddPerson, ProjectDetail
+from app.services.gitlab_client import GitLabClientError, list_project_issues, list_project_merge_requests
+from app.services.gitlab_oauth import GitLabOAuthError, get_valid_access_token
 from app.services.permissions import (
     find_user_by_email,
     is_project_manager,
@@ -20,19 +22,6 @@ from app.services.permissions import (
 )
 
 router = APIRouter(prefix="/projects", tags=["projects"])
-
-
-@router.get("/{project_id}/boards", response_model=list[BoardOut])
-async def list_project_boards(
-    project_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[Board]:
-    await require_project_access(project_id, current_user, db)
-    result = await db.execute(
-        select(Board).where(Board.project_id == project_id).order_by(Board.created_at)
-    )
-    return list(result.scalars().all())
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
@@ -61,8 +50,64 @@ async def get_project(
         org_id=project.org_id,
         name=project.name,
         created_at=project.created_at,
+        gitlab_project_id=project.gitlab_project_id,
+        gitlab_project_path=project.gitlab_project_path,
+        gitlab_web_url=project.gitlab_web_url,
+        gitlab_default_branch=project.gitlab_default_branch,
         managers=[ProjectPersonOut(user_id=i, name=n, email=e) for i, n, e in managers_result.all()],
         members=[ProjectPersonOut(user_id=i, name=n, email=e) for i, n, e in members_result.all()],
+    )
+
+
+@router.get("/{project_id}/work-items", response_model=ProjectWorkItemsOut)
+async def get_project_work_items(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectWorkItemsOut:
+    project = await require_project_access(project_id, current_user, db)
+
+    if project.gitlab_project_id is None:
+        return ProjectWorkItemsOut(merge_requests=[], issues=[])
+
+    connection = await _get_connection(project.org_id, db)
+    if connection is None or connection.encrypted_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="GitLab isn't connected for this organization"
+        )
+
+    try:
+        token = await get_valid_access_token(connection, db)
+        mrs = await list_project_merge_requests(connection.base_url, token, project.gitlab_project_id)
+        issues = await list_project_issues(connection.base_url, token, project.gitlab_project_id)
+    except (GitLabOAuthError, GitLabClientError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ProjectWorkItemsOut(
+        merge_requests=[
+            GitLabProjectMergeRequestOut(
+                iid=mr["iid"],
+                title=mr["title"],
+                web_url=mr["web_url"],
+                state=mr["state"],
+                author_username=(mr.get("author") or {}).get("username"),
+                source_branch=mr["source_branch"],
+                target_branch=mr["target_branch"],
+                updated_at=mr.get("updated_at"),
+            )
+            for mr in mrs
+        ],
+        issues=[
+            GitLabProjectIssueOut(
+                iid=issue["iid"],
+                title=issue["title"],
+                web_url=issue["web_url"],
+                state=issue["state"],
+                author_username=(issue.get("author") or {}).get("username"),
+                updated_at=issue.get("updated_at"),
+            )
+            for issue in issues
+        ],
     )
 
 

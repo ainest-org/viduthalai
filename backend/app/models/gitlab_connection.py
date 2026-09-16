@@ -28,7 +28,6 @@ class GitLabConnection(Base):
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     gitlab_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    webhook_secret: Mapped[str] = mapped_column(String(64), nullable=False)
     connected_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

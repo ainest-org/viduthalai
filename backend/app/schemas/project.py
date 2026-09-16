@@ -6,7 +6,8 @@ from app.schemas.organization import ProjectPersonOut
 
 
 class ProjectCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+    gitlab_project_id: int
+    name: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class ProjectOut(BaseModel):
@@ -16,6 +17,10 @@ class ProjectOut(BaseModel):
     org_id: int
     name: str
     created_at: datetime
+    gitlab_project_id: int | None
+    gitlab_project_path: str | None
+    gitlab_web_url: str | None
+    gitlab_default_branch: str | None
 
 
 class ProjectDetail(ProjectOut):

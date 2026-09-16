@@ -44,3 +44,8 @@ class GitLabProjectIssueOut(BaseModel):
     state: str
     author_username: str | None = None
     updated_at: str | None = None
+
+
+class ProjectWorkItemsOut(BaseModel):
+    merge_requests: list[GitLabProjectMergeRequestOut]
+    issues: list[GitLabProjectIssueOut]

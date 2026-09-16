@@ -3,11 +3,13 @@
 import { use, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { ExternalLink, GitBranch, GitMerge, ListTodo, Plus, Trash2 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { Board, MilestoneMetrics, ProjectDetail } from "@/lib/types";
+import type { ProjectDetail, ProjectWorkItems } from "@/lib/types";
+import { MR_STATE_META } from "@/lib/gitlab-meta";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,12 +72,9 @@ export default function ProjectDetailPage({
   const { user } = useAuth();
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [milestones, setMilestones] = useState<MilestoneMetrics[] | null>(null);
-  const [boards, setBoards] = useState<Board[] | null>(null);
+  const [workItems, setWorkItems] = useState<ProjectWorkItems | null>(null);
+  const [workItemsError, setWorkItemsError] = useState<string | null>(null);
   const [isOrgAdmin, setIsOrgAdmin] = useState(false);
-  const [boardName, setBoardName] = useState("");
-  const [boardDialogOpen, setBoardDialogOpen] = useState(false);
-  const [creatingBoard, setCreatingBoard] = useState(false);
 
   const [managerEmail, setManagerEmail] = useState("");
   const [managerDialogOpen, setManagerDialogOpen] = useState(false);
@@ -85,24 +84,15 @@ export default function ProjectDetailPage({
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
 
-  const [milestoneTitle, setMilestoneTitle] = useState("");
-  const [milestoneDueDate, setMilestoneDueDate] = useState("");
-  const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false);
-  const [creatingMilestone, setCreatingMilestone] = useState(false);
-
   useEffect(() => {
     api
       .getProject(projectId)
       .then(setProject)
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load project"));
     api
-      .listMilestones(projectId)
-      .then(setMilestones)
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load milestones"));
-    api
-      .listProjectBoards(projectId)
-      .then(setBoards)
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Failed to load boards"));
+      .getProjectWorkItems(projectId)
+      .then(setWorkItems)
+      .catch((err) => setWorkItemsError(err instanceof ApiError ? err.message : "Failed to load work items"));
     api
       .listOrganizations()
       .then((orgs) => setIsOrgAdmin(orgs.some((o) => o.id === orgId && o.role === "admin")))
@@ -168,71 +158,15 @@ export default function ProjectDetailPage({
     }
   }
 
-  async function handleCreateMilestone(e: FormEvent) {
-    e.preventDefault();
-    if (!milestoneTitle.trim()) return;
-    setCreatingMilestone(true);
-    try {
-      const milestone = await api.createMilestone(projectId, {
-        title: milestoneTitle.trim(),
-        due_date: milestoneDueDate || null,
-      });
-      setMilestones((prev) => [
-        ...(prev ?? []),
-        {
-          ...milestone,
-          total_cards: 0,
-          completed_cards: 0,
-          completion_pct: 0,
-          overdue_count: 0,
-          avg_cycle_time_hours: null,
-        },
-      ]);
-      setMilestoneTitle("");
-      setMilestoneDueDate("");
-      setMilestoneDialogOpen(false);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to create milestone");
-    } finally {
-      setCreatingMilestone(false);
-    }
-  }
-
-  async function handleCreateBoard(e: FormEvent) {
-    e.preventDefault();
-    if (!boardName.trim()) return;
-    setCreatingBoard(true);
-    try {
-      const board = await api.createBoard({ name: boardName.trim(), project_id: projectId });
-      setBoards((prev) => [...(prev ?? []), board]);
-      setBoardName("");
-      setBoardDialogOpen(false);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to create board");
-    } finally {
-      setCreatingBoard(false);
-    }
-  }
-
-  async function handleDeleteMilestone(milestoneId: number) {
-    if (!window.confirm("Delete this milestone? Cards linked to it will be unlinked, not deleted.")) return;
-    const previous = milestones;
-    setMilestones((prev) => (prev ?? []).filter((m) => m.id !== milestoneId));
-    try {
-      await api.deleteMilestone(milestoneId);
-    } catch (err) {
-      setMilestones(previous);
-      toast.error(err instanceof ApiError ? err.message : "Failed to delete milestone");
-    }
-  }
-
-  if (!project || !milestones || !boards) {
+  if (!project) {
     return (
       <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8 sm:px-8">
         <Skeleton className="h-40 rounded-2xl" />
       </div>
     );
   }
+
+  const totalOpen = workItems ? workItems.merge_requests.length + workItems.issues.length : 0;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-8 sm:px-8">
@@ -244,53 +178,76 @@ export default function ProjectDetailPage({
           ← Organization
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
+        {project.gitlab_web_url && (
+          <a
+            href={project.gitlab_web_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
+          >
+            <GitBranch className="size-3.5 shrink-0" />
+            {project.gitlab_project_path}
+            <ExternalLink className="size-3 shrink-0" />
+          </a>
+        )}
       </div>
 
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight">Boards</h2>
-          {canManage && (
-            <Dialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="rounded-full">
-                  <Plus />
-                  New board
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create a board</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleCreateBoard} className="flex flex-col gap-4">
-                  <Input
-                    autoFocus
-                    placeholder="Board name"
-                    value={boardName}
-                    onChange={(e) => setBoardName(e.target.value)}
-                  />
-                  <DialogFooter>
-                    <Button type="submit" disabled={creatingBoard}>
-                      {creatingBoard ? "Creating..." : "Create board"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
+        <h2 className="text-lg font-semibold tracking-tight">
+          Work items {workItems && <span className="font-normal text-muted-foreground">({totalOpen})</span>}
+        </h2>
 
-        {boards.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No boards yet.</p>
+        {workItemsError ? (
+          <p className="text-sm text-muted-foreground">{workItemsError}</p>
+        ) : !workItems ? (
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-14 rounded-xl" />
+            <Skeleton className="h-14 rounded-xl" />
+          </div>
+        ) : totalOpen === 0 ? (
+          <p className="text-sm text-muted-foreground">No open merge requests or work items in this repo.</p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {boards.map((board) => (
-              <Link
-                key={board.id}
-                href={`/boards/${board.id}`}
-                className="block rounded-xl border border-border/60 bg-card p-4 card-shadow card-shadow-hover transition-shadow duration-200"
+          <div className="flex flex-col gap-2">
+            {workItems.merge_requests.map((mr) => (
+              <a
+                key={`mr-${mr.iid}`}
+                href={mr.web_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-border/60 bg-card p-3.5 card-shadow card-shadow-hover transition-shadow duration-200"
               >
-                <p className="text-sm font-medium">{board.name}</p>
-              </Link>
+                <GitMerge className={cn("size-4 shrink-0", MR_STATE_META[mr.state]?.text)} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-medium text-foreground">{mr.title}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {mr.source_branch} → {mr.target_branch}
+                    {mr.author_username && ` · @${mr.author_username}`}
+                  </p>
+                </div>
+                <span className={cn("shrink-0 text-xs font-medium", MR_STATE_META[mr.state]?.text)}>
+                  {MR_STATE_META[mr.state]?.label ?? mr.state}
+                </span>
+              </a>
+            ))}
+            {workItems.issues.map((issue) => (
+              <a
+                key={`issue-${issue.iid}`}
+                href={issue.web_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-border/60 bg-card p-3.5 card-shadow card-shadow-hover transition-shadow duration-200"
+              >
+                <ListTodo className={cn("size-4 shrink-0", MR_STATE_META[issue.state]?.text)} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-medium text-foreground">{issue.title}</p>
+                  {issue.author_username && (
+                    <p className="truncate text-xs text-muted-foreground">@{issue.author_username}</p>
+                  )}
+                </div>
+                <span className={cn("shrink-0 text-xs font-medium", MR_STATE_META[issue.state]?.text)}>
+                  {MR_STATE_META[issue.state]?.label ?? issue.state}
+                </span>
+              </a>
             ))}
           </div>
         )}
@@ -374,109 +331,6 @@ export default function ProjectDetailPage({
           )}
         </div>
         <PersonList people={project.members} canRemove={canManage} onRemove={handleRemoveMember} />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight">Milestones</h2>
-          {canManage && (
-            <Dialog open={milestoneDialogOpen} onOpenChange={setMilestoneDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="rounded-full">
-                  <Plus />
-                  New milestone
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create a milestone</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleCreateMilestone} className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="milestone-title">Title</Label>
-                    <Input
-                      id="milestone-title"
-                      autoFocus
-                      placeholder="v1.0 launch"
-                      value={milestoneTitle}
-                      onChange={(e) => setMilestoneTitle(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="milestone-due">Due date</Label>
-                    <Input
-                      id="milestone-due"
-                      type="date"
-                      value={milestoneDueDate}
-                      onChange={(e) => setMilestoneDueDate(e.target.value)}
-                    />
-                  </div>
-                  <DialogFooter>
-                    <Button type="submit" disabled={creatingMilestone}>
-                      {creatingMilestone ? "Creating..." : "Create milestone"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
-
-        {milestones.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No milestones yet.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {milestones.map((m) => (
-              <div
-                key={m.id}
-                className="rounded-2xl border border-border/60 bg-card p-4 card-shadow"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold">{m.title}</p>
-                    {m.due_date && (
-                      <p className="text-xs text-muted-foreground">
-                        Due {new Date(`${m.due_date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                      </p>
-                    )}
-                  </div>
-                  {canManage && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteMilestone(m.id)}
-                      className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div>
-                    <p className="text-lg font-semibold tabular-nums">{m.completion_pct}%</p>
-                    <p className="text-xs text-muted-foreground">
-                      complete ({m.completed_cards}/{m.total_cards})
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold tabular-nums text-destructive">{m.overdue_count}</p>
-                    <p className="text-xs text-muted-foreground">overdue</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold tabular-nums">
-                      {m.avg_cycle_time_hours !== null ? `${m.avg_cycle_time_hours}h` : "—"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">avg cycle time</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold tabular-nums">{m.total_cards}</p>
-                    <p className="text-xs text-muted-foreground">total cards</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </section>
     </div>
   );

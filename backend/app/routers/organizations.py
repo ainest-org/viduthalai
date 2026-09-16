@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
+from app.models.gitlab_connection import GitLabConnection
 from app.models.organization import Organization, OrgMembership
 from app.models.project import Project, ProjectManager, ProjectMember
 from app.models.user import User
@@ -15,6 +16,8 @@ from app.schemas.organization import (
     OrgMemberOut,
 )
 from app.schemas.project import ProjectCreate, ProjectOut
+from app.services.gitlab_client import GitLabClientError, get_project
+from app.services.gitlab_oauth import GitLabOAuthError, get_valid_access_token
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -167,7 +170,34 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
 ) -> Project:
     await _require_admin(org_id, current_user, db)
-    project = Project(org_id=org_id, name=payload.name)
+
+    connection_result = await db.execute(select(GitLabConnection).where(GitLabConnection.org_id == org_id))
+    connection = connection_result.scalar_one_or_none()
+    if connection is None or connection.encrypted_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Connect GitLab for this organization first"
+        )
+
+    existing = await db.execute(
+        select(Project).where(Project.org_id == org_id, Project.gitlab_project_id == payload.gitlab_project_id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A project already tracks that repo")
+
+    try:
+        token = await get_valid_access_token(connection, db)
+        repo = await get_project(connection.base_url, token, payload.gitlab_project_id)
+    except (GitLabOAuthError, GitLabClientError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    project = Project(
+        org_id=org_id,
+        name=payload.name or repo["name"],
+        gitlab_project_id=repo["id"],
+        gitlab_project_path=repo["path_with_namespace"],
+        gitlab_web_url=repo["web_url"],
+        gitlab_default_branch=repo.get("default_branch"),
+    )
     db.add(project)
     await db.commit()
     await db.refresh(project)

@@ -19,9 +19,8 @@ redirect URI the app generates will be missing the `/api` prefix and won't work.
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 ```
 
-This runs Postgres, Redis, the backend API (`127.0.0.1:8000`), the frontend
-(`127.0.0.1:3000`), and the RQ worker that processes GitLab webhooks. Nothing
-is exposed publicly except through your own nginx.
+This runs Postgres, the backend API (`127.0.0.1:8000`), and the frontend
+(`127.0.0.1:3000`). Nothing is exposed publicly except through your own nginx.
 
 ## Point your VPS nginx at it
 
@@ -42,10 +41,6 @@ location / {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
-
-GitLab webhooks land on `/api/webhooks/gitlab/{org_id}` — the org's GitLab
-settings page shows the exact URL and secret to paste into each GitLab
-project's webhook config once this is live.
 
 GitLab is connected via OAuth: an org admin registers an OAuth application
 on their GitLab instance, then pastes its Application ID and Secret into the
@@ -72,5 +67,4 @@ Migrations run automatically on backend container start (`alembic upgrade head`)
 
 ```bash
 docker compose -f docker-compose.prod.yml logs -f backend
-docker compose -f docker-compose.prod.yml logs -f worker
 ```

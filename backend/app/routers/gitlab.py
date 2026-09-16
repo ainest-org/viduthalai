@@ -1,8 +1,7 @@
-import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,11 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.jobs.gitlab_webhook import process_webhook_event
 from app.models.gitlab_connection import GitLabConnection
 from app.models.user import User
-from app.models.webhook_event import WebhookEvent
-from app.queue import webhook_queue
 from app.schemas.gitlab import GitLabConnectionOut, GitLabOAuthStart, GitLabOAuthStartOut
 from app.services.crypto import decrypt, encrypt
 from app.services.gitlab_client import GitLabClientError
@@ -35,10 +31,6 @@ def _public_base_url(request: Request) -> str:
     if settings.public_api_base_url:
         return settings.public_api_base_url.rstrip("/")
     return str(request.base_url).rstrip("/")
-
-
-def _webhook_url(org_id: int, request: Request) -> str:
-    return f"{_public_base_url(request)}/webhooks/gitlab/{org_id}"
 
 
 def _oauth_redirect_uri(request: Request) -> str:
@@ -66,7 +58,6 @@ async def _require_org_admin(org_id: int, user: User, db: AsyncSession) -> None:
 @router.get("/organizations/{org_id}/gitlab", response_model=GitLabConnectionOut)
 async def get_gitlab_connection(
     org_id: int,
-    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GitLabConnectionOut:
@@ -80,8 +71,6 @@ async def get_gitlab_connection(
         base_url=connection.base_url,
         client_id=connection.client_id,
         gitlab_username=connection.gitlab_username,
-        webhook_url=_webhook_url(org_id, request),
-        webhook_secret=connection.webhook_secret,
         connected_at=connection.created_at,
     )
 
@@ -99,7 +88,7 @@ async def start_gitlab_oauth(
     base_url = payload.base_url.rstrip("/")
     connection = await _get_connection(org_id, db)
     if connection is None:
-        connection = GitLabConnection(org_id=org_id, webhook_secret=secrets.token_urlsafe(32))
+        connection = GitLabConnection(org_id=org_id)
         db.add(connection)
 
     connection.base_url = base_url
@@ -176,29 +165,3 @@ async def disconnect_gitlab(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not connected")
     await db.delete(connection)
     await db.commit()
-
-
-@router.post("/webhooks/gitlab/{org_id}", status_code=status.HTTP_202_ACCEPTED)
-async def receive_gitlab_webhook(
-    org_id: int,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    x_gitlab_token: str | None = Header(default=None, alias="X-Gitlab-Token"),
-) -> dict:
-    connection = await _get_connection(org_id, db)
-    if connection is None or not x_gitlab_token or not secrets.compare_digest(
-        x_gitlab_token, connection.webhook_secret
-    ):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token")
-
-    body = await request.json()
-    event_type = body.get("object_kind", "unknown")
-
-    event = WebhookEvent(org_id=org_id, event_type=event_type, payload=body)
-    db.add(event)
-    await db.commit()
-    await db.refresh(event)
-
-    webhook_queue.enqueue(process_webhook_event, event.id)
-
-    return {"status": "queued"}
