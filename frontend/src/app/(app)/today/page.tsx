@@ -21,7 +21,7 @@ export default function TodayPage() {
       .getGitLabWorkStatus()
       .then((status) => {
         setGitlabStatus(status);
-        if (!status.connected) return;
+        if (!status.connected || !status.org_member) return;
         api.listMyGitLabMergeRequests().then(setMergeRequests).catch(() => setMergeRequests([]));
         api.listMyGitLabIssues().then(setIssues).catch(() => setIssues([]));
         api
@@ -69,7 +69,7 @@ export default function TodayPage() {
         )}
       </div>
 
-      {gitlabStatus.connected && (
+      {gitlabStatus.connected && gitlabStatus.org_member && (
         <GitLabSection
           title="My merge requests"
           icon={<GitMerge className="size-3.5" />}
@@ -85,7 +85,7 @@ export default function TodayPage() {
         />
       )}
 
-      {gitlabStatus.connected && (
+      {gitlabStatus.connected && gitlabStatus.org_member && (
         <GitLabSection
           title="My work items"
           icon={<ListTodo className="size-3.5" />}
@@ -118,6 +118,13 @@ export default function TodayPage() {
       {!gitlabStatus.connected && (
         <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
           Connect GitLab to see your merge requests and work items here.
+        </div>
+      )}
+
+      {gitlabStatus.connected && !gitlabStatus.org_member && (
+        <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+          You&apos;re signed in with GitLab as @{gitlabStatus.gitlab_username}, but you haven&apos;t been added
+          to an organization yet. Ask an admin to add you.
         </div>
       )}
     </div>

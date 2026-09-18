@@ -41,6 +41,12 @@ async def get_org_role(org_id: int, user_id: int, db: AsyncSession) -> str | Non
     return result.scalar_one_or_none()
 
 
+async def is_org_member_anywhere(user_id: int, db: AsyncSession) -> bool:
+    """Whether an admin has added this user to any organization yet."""
+    result = await db.execute(select(OrgMembership.id).where(OrgMembership.user_id == user_id).limit(1))
+    return result.scalar_one_or_none() is not None
+
+
 async def is_project_manager(project_id: int, user_id: int, db: AsyncSession) -> bool:
     result = await db.execute(
         select(ProjectManager.id).where(

@@ -38,3 +38,19 @@ class ProjectPersonOut(BaseModel):
 class MemberAdd(BaseModel):
     email: EmailStr
     role: Role = "dev"
+    name: str | None = Field(default=None, max_length=255)
+    """If no Viduthalai account exists for this email yet, a new one is created with this name."""
+
+
+class GitLabMemberCandidateOut(BaseModel):
+    gitlab_user_id: int
+    username: str
+    name: str
+    avatar_url: str | None = None
+
+
+class MemberAddFromGitLab(BaseModel):
+    gitlab_user_id: int
+    username: str
+    name: str
+    role: Role = "dev"

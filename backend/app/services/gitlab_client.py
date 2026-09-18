@@ -95,3 +95,8 @@ async def list_project_merge_requests(base_url: str, access_token: str, project_
 async def list_project_issues(base_url: str, access_token: str, project_id: int) -> list[dict]:
     params = {"state": "opened", "order_by": "updated_at", "per_page": 100}
     return await _get(base_url, access_token, f"/projects/{project_id}/issues", params)
+
+
+async def list_project_members(base_url: str, access_token: str, project_id: int) -> list[dict]:
+    """All members of this project, including those inherited from parent groups."""
+    return await _get(base_url, access_token, f"/projects/{project_id}/members/all", {"per_page": 100})

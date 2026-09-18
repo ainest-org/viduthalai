@@ -6,6 +6,9 @@ from app.schemas.gitlab_admin import GitLabBranchOut, GitLabProjectIssueOut, Git
 class GitLabWorkStatus(BaseModel):
     connected: bool
     gitlab_username: str | None = None
+    org_member: bool = False
+    """Whether an admin has added this user to an organization yet. Until then, their
+    personal MRs/issues/elevated-access stay hidden even if their GitLab identity is linked."""
 
 
 class GitLabMergeRequestOut(BaseModel):

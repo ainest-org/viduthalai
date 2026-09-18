@@ -27,15 +27,28 @@ from app.services.gitlab_client import (
     project_path_from_item_url,
 )
 from app.services.gitlab_oauth import GitLabOAuthError, get_valid_user_gitlab_token
+from app.services.permissions import is_org_member_anywhere
 
 router = APIRouter(prefix="/me/gitlab", tags=["me"])
 
 
+async def _require_org_member(current_user: User, db: AsyncSession) -> None:
+    if not await is_org_member_anywhere(current_user.id, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You haven't been added to an organization yet — ask an admin to add you",
+        )
+
+
 @router.get("/status", response_model=GitLabWorkStatus)
-async def gitlab_status(current_user: User = Depends(get_current_user)) -> GitLabWorkStatus:
+async def gitlab_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GitLabWorkStatus:
     return GitLabWorkStatus(
         connected=current_user.encrypted_gitlab_token is not None,
         gitlab_username=current_user.gitlab_username,
+        org_member=await is_org_member_anywhere(current_user.id, db),
     )
 
 
@@ -46,6 +59,7 @@ async def my_merge_requests(
 ) -> list[GitLabMergeRequestOut]:
     if current_user.gitlab_connection is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not signed in with GitLab")
+    await _require_org_member(current_user, db)
 
     try:
         access_token = await get_valid_user_gitlab_token(current_user, db)
@@ -75,6 +89,7 @@ async def my_issues(
 ) -> list[GitLabIssueOut]:
     if current_user.gitlab_connection is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not signed in with GitLab")
+    await _require_org_member(current_user, db)
 
     try:
         access_token = await get_valid_user_gitlab_token(current_user, db)
@@ -104,6 +119,7 @@ async def my_elevated_access(
     with full branch/MR/issue detail, for the personal "elevated access" panel."""
     if current_user.gitlab_connection is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not signed in with GitLab")
+    await _require_org_member(current_user, db)
 
     base_url = current_user.gitlab_connection.base_url
     try:
