@@ -8,7 +8,14 @@ import { Check, Copy, ExternalLink, GitBranch, Plus, Trash2 } from "lucide-react
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { GitLabConnection, GitLabProjectSummary, OrgMember, OrgRole, Project } from "@/lib/types";
+import type {
+  GitLabConnection,
+  GitLabMemberCandidate,
+  GitLabProjectSummary,
+  OrgMember,
+  OrgRole,
+  Project,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -229,10 +236,16 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
   const [members, setMembers] = useState<OrgMember[] | null>(null);
   const [projects, setProjects] = useState<Project[] | null>(null);
 
+  const [memberTab, setMemberTab] = useState<"email" | "gitlab">("email");
   const [memberEmail, setMemberEmail] = useState("");
+  const [memberName, setMemberName] = useState("");
   const [memberRole, setMemberRole] = useState<OrgRole>("dev");
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
+
+  const [gitlabCandidates, setGitlabCandidates] = useState<GitLabMemberCandidate[] | null>(null);
+  const [gitlabCandidatesError, setGitlabCandidatesError] = useState<string | null>(null);
+  const [addingCandidateId, setAddingCandidateId] = useState<number | null>(null);
 
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [availableRepos, setAvailableRepos] = useState<GitLabProjectSummary[] | null>(null);
@@ -257,15 +270,41 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
     if (!memberEmail.trim()) return;
     setAddingMember(true);
     try {
-      const member = await api.addOrgMember(orgId, memberEmail.trim(), memberRole);
+      const member = await api.addOrgMember(orgId, memberEmail.trim(), memberRole, memberName.trim());
       setMembers((prev) => [...(prev ?? []), member]);
       setMemberEmail("");
+      setMemberName("");
       setMemberRole("dev");
       setMemberDialogOpen(false);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to add member");
     } finally {
       setAddingMember(false);
+    }
+  }
+
+  function openGitLabMemberTab() {
+    setMemberTab("gitlab");
+    setGitlabCandidates(null);
+    setGitlabCandidatesError(null);
+    api
+      .listGitLabMemberCandidates(orgId)
+      .then(setGitlabCandidates)
+      .catch((err) =>
+        setGitlabCandidatesError(err instanceof ApiError ? err.message : "Failed to load GitLab members")
+      );
+  }
+
+  async function handleAddCandidate(candidate: GitLabMemberCandidate) {
+    setAddingCandidateId(candidate.gitlab_user_id);
+    try {
+      const member = await api.addOrgMemberFromGitLab(orgId, candidate, memberRole);
+      setMembers((prev) => [...(prev ?? []), member]);
+      setGitlabCandidates((prev) => (prev ?? []).filter((c) => c.gitlab_user_id !== candidate.gitlab_user_id));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to add member");
+    } finally {
+      setAddingCandidateId(null);
     }
   }
 
@@ -324,7 +363,13 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold tracking-tight">Members</h2>
               {isAdmin && (
-                <Dialog open={memberDialogOpen} onOpenChange={setMemberDialogOpen}>
+                <Dialog
+                  open={memberDialogOpen}
+                  onOpenChange={(next) => {
+                    setMemberDialogOpen(next);
+                    if (next) setMemberTab("email");
+                  }}
+                >
                   <DialogTrigger asChild>
                     <Button size="sm" variant="outline" className="rounded-full">
                       <Plus />
@@ -335,46 +380,119 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ o
                     <DialogHeader>
                       <DialogTitle>Add a member</DialogTitle>
                     </DialogHeader>
-                    <form onSubmit={handleAddMember} className="flex flex-col gap-4">
-                      <div className="flex flex-col gap-2">
-                        <Label htmlFor="member-email">Email</Label>
-                        <Input
-                          id="member-email"
-                          type="email"
-                          autoFocus
-                          placeholder="person@example.com"
-                          value={memberEmail}
-                          onChange={(e) => setMemberEmail(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          They need an existing Viduthalai account.
-                        </p>
+
+                    <div className="flex gap-2 border-b border-border/60 pb-3">
+                      <button
+                        type="button"
+                        onClick={() => setMemberTab("email")}
+                        className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                          memberTab === "email"
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border/60 bg-card text-muted-foreground hover:bg-accent"
+                        }`}
+                      >
+                        By email
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openGitLabMemberTab}
+                        className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                          memberTab === "gitlab"
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border/60 bg-card text-muted-foreground hover:bg-accent"
+                        }`}
+                      >
+                        From GitLab
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <Label>Role</Label>
+                      <div className="flex gap-2">
+                        {ROLE_OPTIONS.map((role) => (
+                          <button
+                            key={role}
+                            type="button"
+                            onClick={() => setMemberRole(role)}
+                            className={`rounded-full border px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
+                              memberRole === role
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border/60 bg-card text-muted-foreground hover:bg-accent"
+                            }`}
+                          >
+                            {role}
+                          </button>
+                        ))}
                       </div>
-                      <div className="flex flex-col gap-2">
-                        <Label>Role</Label>
-                        <div className="flex gap-2">
-                          {ROLE_OPTIONS.map((role) => (
-                            <button
-                              key={role}
-                              type="button"
-                              onClick={() => setMemberRole(role)}
-                              className={`rounded-full border px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
-                                memberRole === role
-                                  ? "border-primary bg-primary text-primary-foreground"
-                                  : "border-border/60 bg-card text-muted-foreground hover:bg-accent"
-                              }`}
-                            >
-                              {role}
-                            </button>
-                          ))}
+                    </div>
+
+                    {memberTab === "email" ? (
+                      <form onSubmit={handleAddMember} className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-2">
+                          <Label htmlFor="member-email">Email</Label>
+                          <Input
+                            id="member-email"
+                            type="email"
+                            autoFocus
+                            placeholder="person@example.com"
+                            value={memberEmail}
+                            onChange={(e) => setMemberEmail(e.target.value)}
+                          />
                         </div>
+                        <div className="flex flex-col gap-2">
+                          <Label htmlFor="member-name">Name (only if they don&apos;t have an account yet)</Label>
+                          <Input
+                            id="member-name"
+                            placeholder="Jane Doe"
+                            value={memberName}
+                            onChange={(e) => setMemberName(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            If that email already has a Viduthalai account, leave this blank — they&apos;ll
+                            just be added. Otherwise, filling it in creates their account.
+                          </p>
+                        </div>
+                        <DialogFooter>
+                          <Button type="submit" disabled={addingMember}>
+                            {addingMember ? "Adding..." : "Add member"}
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    ) : gitlabCandidatesError ? (
+                      <p className="text-sm text-muted-foreground">
+                        {gitlabCandidatesError}
+                        {gitlabCandidatesError.toLowerCase().includes("gitlab") && " Connect GitLab below first."}
+                      </p>
+                    ) : gitlabCandidates === null ? (
+                      <div className="flex flex-col gap-2">
+                        <Skeleton className="h-12 rounded-xl" />
+                        <Skeleton className="h-12 rounded-xl" />
                       </div>
-                      <DialogFooter>
-                        <Button type="submit" disabled={addingMember}>
-                          {addingMember ? "Adding..." : "Add member"}
-                        </Button>
-                      </DialogFooter>
-                    </form>
+                    ) : gitlabCandidates.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No more GitLab users to add — everyone visible across your repos is already a member.
+                      </p>
+                    ) : (
+                      <div className="scroll-thin flex max-h-80 flex-col gap-2 overflow-y-auto">
+                        {gitlabCandidates.map((candidate) => (
+                          <button
+                            key={candidate.gitlab_user_id}
+                            type="button"
+                            disabled={addingCandidateId !== null}
+                            onClick={() => handleAddCandidate(candidate)}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card px-4 py-2.5 text-left transition-colors hover:bg-accent disabled:opacity-50"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{candidate.name}</p>
+                              <p className="truncate text-xs text-muted-foreground">@{candidate.username}</p>
+                            </div>
+                            {addingCandidateId === candidate.gitlab_user_id && (
+                              <span className="shrink-0 text-xs text-muted-foreground">Adding...</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </DialogContent>
                 </Dialog>
               )}

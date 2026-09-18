@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -13,11 +14,13 @@ from app.schemas.gitlab_admin import (
     GitLabProjectMergeRequestOut,
     GitLabProjectSummary,
 )
+from app.schemas.organization import GitLabMemberCandidateOut
 from app.services.gitlab_client import (
     GitLabClientError,
     get_project,
     list_branches,
     list_project_issues,
+    list_project_members,
     list_project_merge_requests,
     list_projects,
 )
@@ -124,6 +127,49 @@ async def list_gitlab_project_merge_requests(
         )
         for mr in mrs
     ]
+
+
+@router.get("/members", response_model=list[GitLabMemberCandidateOut])
+async def list_gitlab_member_candidates(
+    org_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[GitLabMemberCandidateOut]:
+    """Everyone visible across the org's GitLab repos who isn't already an org member,
+    for the admin's "add staff from GitLab" picker."""
+    connection = await _get_connected_connection(org_id, current_user, db)
+
+    already_linked = await db.execute(
+        select(User.gitlab_user_id).where(
+            User.gitlab_connection_id == connection.id, User.gitlab_user_id.is_not(None)
+        )
+    )
+    already_linked_ids = {row[0] for row in already_linked.all()}
+
+    try:
+        token = await get_valid_access_token(connection, db)
+        projects = await list_projects(connection.base_url, token)
+    except (GitLabOAuthError, GitLabClientError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    candidates: dict[int, GitLabMemberCandidateOut] = {}
+    for project in projects:
+        try:
+            members = await list_project_members(connection.base_url, token, project["id"])
+        except GitLabClientError:
+            continue
+        for member in members:
+            member_id = member["id"]
+            if member_id in already_linked_ids or member_id in candidates:
+                continue
+            candidates[member_id] = GitLabMemberCandidateOut(
+                gitlab_user_id=member_id,
+                username=member["username"],
+                name=member.get("name") or member["username"],
+                avatar_url=member.get("avatar_url"),
+            )
+
+    return sorted(candidates.values(), key=lambda c: c.name.lower())
 
 
 @router.get("/projects/{project_id}/issues", response_model=list[GitLabProjectIssueOut])

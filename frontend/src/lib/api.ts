@@ -6,6 +6,7 @@ import type {
   GitLabElevatedAccess,
   GitLabIssueItem,
   GitLabLoginProvider,
+  GitLabMemberCandidate,
   GitLabMergeRequestItem,
   GitLabProjectDetail,
   GitLabProjectIssue,
@@ -118,10 +119,20 @@ export const api = {
 
   listOrgMembers: (orgId: number) => request<OrgMember[]>(`/organizations/${orgId}/members`),
 
-  addOrgMember: (orgId: number, email: string, role: OrgRole) =>
+  addOrgMember: (orgId: number, email: string, role: OrgRole, name?: string) =>
     request<OrgMember>(`/organizations/${orgId}/members`, {
       method: "POST",
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email, role, name: name || undefined }),
+    }),
+
+  addOrgMemberFromGitLab: (
+    orgId: number,
+    candidate: { gitlab_user_id: number; username: string; name: string },
+    role: OrgRole
+  ) =>
+    request<OrgMember>(`/organizations/${orgId}/members/from-gitlab`, {
+      method: "POST",
+      body: JSON.stringify({ ...candidate, role }),
     }),
 
   removeOrgMember: (orgId: number, userId: number) =>
@@ -185,6 +196,9 @@ export const api = {
 
   listGitLabOrgProjectIssues: (orgId: number, projectId: number) =>
     request<GitLabProjectIssue[]>(`/organizations/${orgId}/gitlab/projects/${projectId}/issues`),
+
+  listGitLabMemberCandidates: (orgId: number) =>
+    request<GitLabMemberCandidate[]>(`/organizations/${orgId}/gitlab/members`),
 
   // Team workload
   getTeamWorkload: (orgId: number) => request<TeamWorkload>(`/organizations/${orgId}/team-workload`),

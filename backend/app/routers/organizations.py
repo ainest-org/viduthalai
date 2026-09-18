@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,14 +10,17 @@ from app.models.gitlab_connection import GitLabConnection
 from app.models.organization import Organization, OrgMembership
 from app.models.project import Project, ProjectManager, ProjectMember
 from app.models.user import User
+from app.routers.gitlab import _get_connection
 from app.schemas.organization import (
     MemberAdd,
+    MemberAddFromGitLab,
     OrganizationCreate,
     OrganizationOut,
     OrganizationWithRole,
     OrgMemberOut,
 )
 from app.schemas.project import ProjectCreate, ProjectOut
+from app.security import hash_password
 from app.services.gitlab_client import GitLabClientError, get_project
 from app.services.gitlab_oauth import GitLabOAuthError, get_valid_access_token
 
@@ -106,10 +111,66 @@ async def add_member(
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No Viduthalai account found with that email",
+        if not payload.name or not payload.name.strip():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No Viduthalai account found with that email — provide a name to create one",
+            )
+        user = User(
+            email=payload.email,
+            name=payload.name.strip(),
+            hashed_password=hash_password(secrets.token_urlsafe(32)),
         )
+        db.add(user)
+        await db.flush()
+
+    existing = await _get_membership(org_id, user.id, db)
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already a member")
+
+    membership = OrgMembership(org_id=org_id, user_id=user.id, role=payload.role)
+    db.add(membership)
+    await db.commit()
+    return OrgMemberOut(user_id=user.id, name=user.name, email=user.email, role=payload.role)
+
+
+@router.post(
+    "/{org_id}/members/from-gitlab", response_model=OrgMemberOut, status_code=status.HTTP_201_CREATED
+)
+async def add_member_from_gitlab(
+    org_id: int,
+    payload: MemberAddFromGitLab,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OrgMemberOut:
+    """Add a staff member picked from the org's connected GitLab instance. If they've never
+    signed in to Viduthalai, a placeholder account is pre-provisioned and binds automatically
+    the first time they actually sign in with GitLab."""
+    await _require_admin(org_id, current_user, db)
+
+    connection = await _get_connection(org_id, db)
+    if connection is None or connection.encrypted_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Connect GitLab for this organization first"
+        )
+
+    result = await db.execute(
+        select(User).where(
+            User.gitlab_connection_id == connection.id, User.gitlab_user_id == payload.gitlab_user_id
+        )
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(
+            email=f"gitlab-{connection.id}-{payload.gitlab_user_id}@pending.viduthalai.local",
+            name=payload.name or payload.username,
+            hashed_password=hash_password(secrets.token_urlsafe(32)),
+            gitlab_connection_id=connection.id,
+            gitlab_user_id=payload.gitlab_user_id,
+            gitlab_username=payload.username,
+        )
+        db.add(user)
+        await db.flush()
 
     existing = await _get_membership(org_id, user.id, db)
     if existing is not None:

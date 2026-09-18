@@ -71,6 +71,14 @@ export interface GitLabLoginProvider {
 export interface GitLabWorkStatus {
   connected: boolean;
   gitlab_username: string | null;
+  org_member: boolean;
+}
+
+export interface GitLabMemberCandidate {
+  gitlab_user_id: number;
+  username: string;
+  name: string;
+  avatar_url: string | null;
 }
 
 export interface GitLabMergeRequestItem {
